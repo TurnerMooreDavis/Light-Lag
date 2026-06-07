@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LIGHT LAG — relativistic ship combat</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2304070d'/%3E%3Ccircle cx='5' cy='8' r='2.4' fill='%2338e1ff'/%3E%3Ccircle cx='11' cy='8' r='2.4' fill='%23ff7a59'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="banner">
+      <div class="title"><b>LIGHT</b> <i>LAG</i></div>
+      <div class="turn" id="turnLabel">TURN 0</div>
+      <div class="phase" id="phaseLabel">—</div>
+    </div>
+
+    <div id="main">
+      <div id="viewport">
+        <canvas id="scene"></canvas>
+        <div id="overlay">
+          <div class="legend" id="legend"></div>
+          <div class="hint" id="hint">drag to orbit · scroll to zoom</div>
+        </div>
+        <div id="curtain">
+          <h1>PASS THE DEVICE</h1>
+          <div class="who" id="curtainWho">PLAYER</div>
+          <p id="curtainMsg"></p>
+          <button class="primary" id="curtainBtn">I'M READY — SHOW MY CONSOLE</button>
+        </div>
+      </div>
+      <div id="console"></div>
+    </div>
+  </div>
+
+  <script src="js/vec3.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/physics.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/viewmodel.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
