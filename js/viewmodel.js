@@ -24,11 +24,12 @@
 
   function backdrop(radius, overtime) {
     const R = radius || CFG.arenaRadius0;
+    // No world-space axis lines through the centre — orientation is shown by the
+    // corner gizmo (render.js _drawGizmo) instead.
     return [
       { type: 'starfield', stars: stars() },
       { type: 'grid', radius: R, step: 25, color: '#102236' },
       { type: 'sphere', center: V.of(), radius: R, color: overtime ? '#3a2030' : '#13283d', rings: 6, seg: 40 },
-      { type: 'axes', origin: V.of(), len: 22 },
     ];
   }
 

@@ -59,10 +59,10 @@
     this.cam.update();
     ctx.clearRect(0, 0, w, h);
 
-    // split primitives: backdrop (grid/sphere/axes) first, then depth-sorted objects, labels last
+    // split primitives: backdrop (grid/sphere) first, then depth-sorted objects, labels last
     const back = [], objs = [], labels = [];
     for (const p of this.scene) {
-      if (p.type === 'grid' || p.type === 'sphere' || p.type === 'axes' || p.type === 'starfield') back.push(p);
+      if (p.type === 'grid' || p.type === 'sphere' || p.type === 'starfield') back.push(p);
       else if (p.type === 'label') labels.push(p);
       else objs.push(p);
     }
@@ -74,6 +74,41 @@
     for (const p of objs) this._drawPrim(p);
 
     for (const p of labels) this._drawPrim(p);
+
+    this._drawGizmo(); // fixed orientation reference in the top-right corner
+  };
+
+  /* Small orientation sphere with X/Y/Z stubs, pinned to the top-right corner
+   * (below the camera-preset buttons). Reflects the live camera orientation. */
+  Renderer.prototype._drawGizmo = function () {
+    const ctx = this.ctx;
+    const cx = this.w - 54, cy = 94, R = 22;
+    const r = this.cam._right, u = this.cam._up, f = this.cam._fwd;
+    ctx.save();
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(110,139,176,0.45)';
+    ctx.fillStyle = 'rgba(10,16,25,0.55)';
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    const axes = [
+      { v: V.of(1, 0, 0), c: '#ff6b6b', n: 'X' },
+      { v: V.of(0, 1, 0), c: '#5cff9d', n: 'Y' },
+      { v: V.of(0, 0, 1), c: '#6db3ff', n: 'Z' },
+    ];
+    axes.forEach((a) => { a._d = V.dot(a.v, f); }); // +ve = pointing into the screen
+    axes.sort((a, b) => b._d - a._d);               // draw far axes first
+    for (const a of axes) {
+      const sx = V.dot(a.v, r), sy = -V.dot(a.v, u);
+      const ex = cx + sx * R, ey = cy + sy * R;
+      const front = a._d <= 0;
+      ctx.globalAlpha = front ? 1 : 0.35;
+      ctx.strokeStyle = a.c; ctx.lineWidth = front ? 1.8 : 1.1;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.fillStyle = a.c;
+      ctx.beginPath(); ctx.arc(ex, ey, 2.2, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = front ? 0.95 : 0.5;
+      ctx.font = '9px "SF Mono", monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(a.n, cx + sx * (R + 8), cy + sy * (R + 8));
+    }
+    ctx.restore();
   };
 
   Renderer.prototype._anchorDepth = function (p) {
@@ -88,7 +123,6 @@
       case 'starfield': return this._starfield(p);
       case 'grid': return this._grid(p);
       case 'sphere': return this._sphere(p);
-      case 'axes': return this._axes(p);
       case 'line': return this._line(p);
       case 'arrow': return this._arrow(p);
       case 'point': return this._point(p);
@@ -242,13 +276,6 @@
         prev = pt;
       }
     }
-  };
-
-  Renderer.prototype._axes = function (p) {
-    const L = p.len || 18, o = p.origin || V.of();
-    this._seg(o, V.add(o, V.of(L, 0, 0)), '#7a3030', 1.2);
-    this._seg(o, V.add(o, V.of(0, L, 0)), '#307a45', 1.2);
-    this._seg(o, V.add(o, V.of(0, 0, L)), '#30557a', 1.2);
   };
 
   Renderer.prototype._starfield = function (p) {

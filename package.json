@@ -1,0 +1,14 @@
+{
+  "name": "light-lag",
+  "version": "1.0.0",
+  "description": "Light Lag — a relativistic light-delay tactical space duel (browser, no runtime deps)",
+  "private": true,
+  "scripts": {
+    "test": "node tests/unit.test.js && node tests/e2e.test.js",
+    "test:unit": "node tests/unit.test.js",
+    "test:e2e": "node tests/e2e.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  }
+}

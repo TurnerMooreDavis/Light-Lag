@@ -97,6 +97,14 @@
     this.plans[player] = plan;
   };
 
+  /* Advance exactly one turn with BOTH players idle. Used by fast-forward to
+   * observe light-lag / debug behaviours without either ship acting. */
+  Game.prototype.idleTurn = function () {
+    this.submitPlan(0, { move: V.of(), weapon: 'none', shield: 0 });
+    this.submitPlan(1, { move: V.of(), weapon: 'none', shield: 0 });
+    return this.resolve();
+  };
+
   /* --- observation (light-delayed) for a given viewer --------------------- */
   Game.prototype.observeEnemy = function (viewer) {
     const me = this.ships[viewer];

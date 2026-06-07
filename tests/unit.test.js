@@ -1,0 +1,261 @@
+/* Unit tests for the DOM-free core: vec3, camera, physics, engine, viewmodel. */
+'use strict';
+const { Runner, loadCore } = require('./harness');
+
+const LL = loadCore();
+const { V, Camera, Phys, Engine, View, CONFIG } = LL;
+const t = new Runner('unit');
+
+/* ===================== vec3 ===================== */
+(() => {
+  t.ok('add', V.eq(V.add(V.of(1, 2, 3), V.of(4, 5, 6)), V.of(5, 7, 9)));
+  t.ok('sub', V.eq(V.sub(V.of(4, 5, 6), V.of(1, 2, 3)), V.of(3, 3, 3)));
+  t.ok('scale', V.eq(V.scale(V.of(1, -2, 3), 2), V.of(2, -4, 6)));
+  t.approx('dot', V.dot(V.of(1, 2, 3), V.of(4, 5, 6)), 32);
+  t.ok('cross', V.eq(V.cross(V.of(1, 0, 0), V.of(0, 1, 0)), V.of(0, 0, 1)));
+  t.approx('len', V.len(V.of(3, 4, 0)), 5);
+  t.approx('dist', V.dist(V.of(0, 0, 0), V.of(0, 3, 4)), 5);
+  t.approx('normalize unit', V.len(V.normalize(V.of(0, 7, 0))), 1);
+  t.ok('normalize zero is zero', V.eq(V.normalize(V.of(0, 0, 0)), V.of(0, 0, 0)));
+  t.ok('lerp midpoint', V.eq(V.lerp(V.of(0, 0, 0), V.of(2, 4, 6), 0.5), V.of(1, 2, 3)));
+  t.approx('clampLen caps', V.len(V.clampLen(V.of(10, 0, 0), 3)), 3);
+  t.ok('clampLen keeps short', V.eq(V.clampLen(V.of(1, 0, 0), 3), V.of(1, 0, 0)));
+  // closest approach: crossing paths meet at t=0.5
+  const ca = V.closestApproach(V.of(-5, 0, 0), V.of(5, 0, 0), V.of(0, -1, 0), V.of(0, 1, 0));
+  t.approx('closestApproach dist', ca.dist, 0, 1e-6);
+  t.approx('closestApproach t', ca.t, 0.5, 1e-6);
+  const cp = V.closestApproach(V.of(0, 5, 0), V.of(0, 5, 0), V.of(0, 0, 0), V.of(0, 0, 0));
+  t.approx('closestApproach static', cp.dist, 5);
+})();
+
+/* ===================== camera ===================== */
+(() => {
+  const cam = new Camera();
+  cam.snapTo('top'); t.ok('snap top looks down', cam.pitch > 1.4);
+  cam.snapTo('front'); t.ok('snap front low pitch', cam.pitch < 0.2);
+  cam.snapTo('side'); t.approx('snap side yaw', cam.yaw, Math.PI * 0.5, 1e-6);
+  cam.snapTo('iso');
+  cam.target = V.of(0, 0, 0); cam.distance = 100; cam.update();
+  const c = cam.project(V.of(0, 0, 0), 800, 600);
+  t.ok('origin is visible in front of camera', c.visible);
+  t.approx('origin projects near center x', c.x, 400, 1);
+  t.approx('origin projects near center y', c.y, 300, 1);
+  const behind = V.add(cam.eye(), V.scale(V.normalize(V.sub(cam.eye(), cam.target)), 40));
+  t.ok('point behind camera not visible', !cam.project(behind, 800, 600).visible);
+  cam.pitch = 0; cam.orbit(0, 99); t.ok('orbit clamps pitch', Math.abs(cam.pitch) < Math.PI / 2);
+  cam.distance = 100; cam.zoom(0.0001); t.ok('zoom clamps min distance', cam.distance >= 20);
+  cam.distance = 100; cam.zoom(1e6); t.ok('zoom clamps max distance', cam.distance <= 600);
+})();
+
+/* ===================== physics: retarded-time observation ===================== */
+(() => {
+  const c = CONFIG.c; // 10
+  const stat = (T, pos) => { const h = []; for (let i = 0; i <= T; i++) h.push({ t: i, pos: V.clone(pos) }); return h; };
+  const O = V.of(0, 0, 0);
+  t.ok('blind before light arrives', Phys.observe(stat(5, V.of(100, 0, 0)), O, 5, c).inbound === true);
+  const r10 = Phys.observe(stat(10, V.of(100, 0, 0)), O, 10, c);
+  t.ok('visible once light arrives', r10.visible);
+  t.approx('stationary 100u @ c10 → 10-turn-old image', r10.age, 10);
+  t.approx('apparent pos == start', r10.pos.x, 100);
+  t.approx('lag stays constant while stationary', Phys.observe(stat(40, V.of(100, 0, 0)), O, 40, c).age, 10);
+  t.approx('30u → age 3', Phys.observe(stat(20, V.of(30, 0, 0)), O, 20, c).age, 3);
+  t.ok('within c → essentially live', Phys.observe(stat(20, V.of(5, 0, 0)), O, 20, c).age < 1);
+  // moving target: image lags true position, retarded equation self-consistent
+  const mov = []; for (let i = 0; i <= 30; i++) mov.push({ t: i, pos: V.of(100 + i, 0, 0) });
+  const rm = Phys.observe(mov, O, 30, c);
+  t.ok('moving-away image is behind true pos', rm.pos.x < 130 - 5);
+  t.approx('retarded eqn holds: dist == c*age', V.dist(rm.pos, O), c * rm.age, 0.3);
+  t.approx('apparent velocity recovered', rm.vel.x, 1, 0.01);
+})();
+
+/* ===================== physics: intercept + swept hit ===================== */
+(() => {
+  const sol = Phys.interceptEstimate(V.of(0, 0, 0), { visible: true, pos: V.of(100, 0, 0), vel: V.of(0, 2, 0), age: 5 }, 10);
+  t.ok('intercept ok', sol.ok);
+  t.approx('estNow extrapolated by age', sol.estNow.y, 10);
+  t.ok('aim leads ahead of estNow', sol.aim.y > 10);
+  t.approx('intercept consistent |aim|==w*tau', V.len(sol.aim), 10 * sol.tau, 0.5);
+  t.ok('uncatchable target → no solution', !Phys.interceptEstimate(V.of(0, 0, 0), { visible: true, pos: V.of(50, 0, 0), vel: V.of(20, 0, 0), age: 0 }, 10).ok);
+  t.ok('swept hit detected', Phys.sweptHit(V.of(-5, 0, 0), V.of(5, 0, 0), V.of(0, -1, 0), V.of(0, 1, 0), 2).hit);
+  t.ok('swept miss', !Phys.sweptHit(V.of(-5, 20, 0), V.of(5, 20, 0), V.of(0, -1, 0), V.of(0, 1, 0), 2).hit);
+})();
+
+/* ===================== engine: setup, budget, resolution ===================== */
+(() => {
+  const g = new Engine();
+  t.approx('ships start 100u apart', V.dist(g.ships[0].pos, g.ships[1].pos), 100, 1e-6);
+  t.ok('plan within budget valid', g.planValid({ move: V.of(2, 0, 0), weapon: 'torpedo', shield: 0 }));
+  t.ok('over-budget plan invalid', !g.planValid({ move: V.of(3, 0, 0), weapon: 'laser', shield: 8 }));
+  t.ok('over-speed plan invalid', !g.planValid({ move: V.of(9, 0, 0), weapon: 'none' }));
+
+  // engine enforces budget even if a plan bypasses the UI
+  const sane = g._enforceBudget({ move: V.of(3, 0, 0), weapon: 'laser', aim: V.of(50, 0, 0), shield: 8, shieldDir: V.of(0, 0, 0) });
+  t.ok('enforceBudget brings cost within budget', g.planCost(sane) <= CONFIG.energyPerTurn + 1e-9);
+  t.ok('enforceBudget sheds shield first', sane.shield === 0);
+
+  // the author's opening scenario: both move + fire, nothing connects, both blind
+  const g2 = new Engine();
+  g2.submitPlan(0, { move: V.of(2, 0, 0), weapon: 'torpedo', aim: V.of(50, 0, 0) });
+  g2.submitPlan(1, { move: V.of(0, 2, 0), weapon: 'torpedo', aim: V.of(-50, 0, 0) });
+  const r1 = g2.resolve();
+  t.ok('turn 1: no hits', r1.hits.length === 0);
+  t.ok('turn 1: two torpedoes launched', r1.spawns.length === 2);
+  t.ok('turn 1: P1 blind to enemy', !g2.observeEnemy(0).visible);
+  t.ok('turn 1: P2 blind to enemy', !g2.observeEnemy(1).visible);
+})();
+
+/* ===================== engine: idle turn / first contact (fast-forward core) ===================== */
+(() => {
+  const g = new Engine();
+  let firstSeen = null, movedWhileIdle = false;
+  const startA = V.clone(g.ships[0].pos), startB = V.clone(g.ships[1].pos);
+  for (let i = 0; i < 15; i++) {
+    g.idleTurn();
+    if (V.dist(g.ships[0].pos, startA) > 1e-9 || V.dist(g.ships[1].pos, startB) > 1e-9) movedWhileIdle = true;
+    if (firstSeen === null && g.observeEnemy(0).visible) firstSeen = g.turn;
+  }
+  t.ok('idleTurn: ships never move', !movedWhileIdle);
+  t.ok('idleTurn: HP unchanged', g.ships[0].hp === CONFIG.startHP && g.ships[1].hp === CONFIG.startHP);
+  t.ok('idleTurn: no projectiles ever', g.projectiles.length === 0);
+  t.ok('idle first contact at turn 10', firstSeen === 10, 'firstSeen=' + firstSeen);
+  t.approx('idle contact image is exactly 10 turns old', g.observeEnemy(0).age, 10, 1e-6);
+  t.ok('idleTurn stores reports', g.reports.length === g.turn);
+})();
+
+/* ===================== engine: combat, shields, overkill, tiebreak ===================== */
+(() => {
+  // laser eventually hits a near, stationary target and deals damage credited to firer
+  const g = new Engine();
+  g.ships[0].pos = V.of(0, 0, 0); g.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }];
+  g.ships[1].pos = V.of(10, 0, 0); g.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }];
+  let hit = false;
+  for (let i = 0; i < 4 && !hit; i++) {
+    g.submitPlan(0, { move: V.of(), weapon: i === 0 ? 'laser' : 'none', aim: V.of(10, 0, 0) });
+    g.submitPlan(1, { move: V.of(), weapon: 'none' });
+    if (g.resolve().hits.length) hit = true;
+  }
+  t.ok('laser hits stationary target', hit);
+  t.ok('damage reduced enemy HP', g.ships[1].hp < CONFIG.startHP);
+  t.ok('damage credited to firer', g.ships[0].damageDealt > 0);
+
+  // shield direction is anchored at the POST-move position (not pre-move)
+  const gs = new Engine();
+  gs.ships[1].pos = V.of(0, 0, 0); gs.ships[1].history = [{ t: 0, pos: V.of(0, 0, 0) }];
+  gs.submitPlan(0, { move: V.of(), weapon: 'none' });
+  gs.submitPlan(1, { move: V.of(3, 0, 0), weapon: 'none', shield: 2, shieldDir: V.of(0, 10, 0) });
+  gs.resolve();
+  const expected = V.normalize(V.sub(V.of(0, 10, 0), V.of(3, 0, 0))); // from post-move (3,0,0)
+  t.ok('shield cone anchored post-move', V.eq(gs.ships[1].shield.dir, expected, 1e-6));
+
+  // shield blocks a shot from the faced cone, but not from behind
+  const blockTest = (faceX) => {
+    const gg = new Engine();
+    gg.ships[0].pos = V.of(0, 0, 0); gg.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }];
+    gg.ships[1].pos = V.of(10, 0, 0); gg.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }];
+    let blocked = 0, dealt = 0;
+    for (let i = 0; i < 4; i++) {
+      gg.submitPlan(0, { move: V.of(), weapon: i === 0 ? 'laser' : 'none', aim: V.of(10, 0, 0) });
+      gg.submitPlan(1, { move: V.of(), weapon: 'none', shield: 8, shieldDir: V.of(faceX, 0, 0) });
+      const r = gg.resolve();
+      r.hits.forEach((h) => { if (h.target === 1) { blocked += h.blocked; dealt += h.damage; } });
+      if (gg.phase !== 'plan') break;
+    }
+    return { blocked, dealt };
+  };
+  t.ok('shield facing the shooter blocks damage', blockTest(0).blocked > 0);     // face -x (toward P1)
+  t.ok('shield facing away blocks nothing', blockTest(100).blocked === 0);       // face +x (away)
+
+  // overkill: two lasers landing the same tick cannot double-credit / multi-log the kill
+  const go = new Engine();
+  go.ships[0].pos = V.of(0, 0, 0); go.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }];
+  go.ships[1].pos = V.of(10, 0, 0); go.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }]; go.ships[1].hp = 10;
+  const laser = () => ({ id: 1, kind: 'proj', type: 'laser', owner: 0, pos: V.of(0, 0, 0), vel: V.of(10, 0, 0), history: [{ t: 0, pos: V.of(0, 0, 0) }], spawnT: 0, life: 50, damage: 45, splash: 0, alive: true });
+  go.projectiles = [laser(), laser()];
+  go.submitPlan(0, { move: V.of(), weapon: 'none' }); go.submitPlan(1, { move: V.of(), weapon: 'none' });
+  const ro = go.resolve();
+  t.ok('doomed ship is destroyed', !go.ships[1].alive);
+  t.ok('only one hit registered on the kill tick', ro.hits.filter((h) => h.target === 1).length === 1);
+  t.ok('overkill not double-credited', go.ships[0].damageDealt <= 45 + 1e-6);
+
+  // torpedo splash deals falloff (a near miss still detonates for partial damage)
+  const gt = new Engine();
+  gt.ships[1].pos = V.of(0, 0, 0); gt.ships[1].history = [{ t: 0, pos: V.of(0, 0, 0) }];
+  const w = CONFIG.weapons.torpedo;
+  gt.projectiles = [{ id: 2, kind: 'proj', type: 'torpedo', owner: 0, pos: V.of(-w.speed, w.splash - 1, 0), vel: V.of(w.speed, 0, 0), history: [{ t: 0, pos: V.of(-w.speed, w.splash - 1, 0) }], spawnT: 0, life: w.life, damage: w.damage, splash: w.splash, alive: true }];
+  gt.submitPlan(0, { move: V.of(), weapon: 'none' }); gt.submitPlan(1, { move: V.of(), weapon: 'none' });
+  const rt = gt.resolve();
+  t.ok('torpedo near-miss detonates with splash', rt.hits.length === 1);
+  t.ok('splash damage is reduced (not full)', rt.hits[0].damage > 0 && rt.hits[0].damage < w.damage);
+})();
+
+/* ===================== engine: overtime + termination + per-viewer log ===================== */
+(() => {
+  const g = new Engine();
+  t.ok('arena full size pre-overtime', g.arenaRadiusAt(CONFIG.normalTurnCap) === CONFIG.arenaRadius0);
+  t.ok('arena shrinks in overtime', g.arenaRadiusAt(CONFIG.normalTurnCap + 10) < CONFIG.arenaRadius0);
+  t.ok('arena clamps to minimum', g.arenaRadiusAt(1e9) === CONFIG.arenaRadiusMin);
+
+  let guard = 0;
+  while (g.phase !== 'gameover' && guard++ < 500) g.idleTurn();
+  t.ok('passive game terminates', g.phase === 'gameover');
+  t.ok('terminates at hard cap', g.turn === CONFIG.hardTurnCap);
+  t.ok('equal passive game is a draw', g.winner === 'draw');
+  t.ok('ships forced inside shrunken arena', V.len(g.ships[0].pos) <= CONFIG.arenaRadiusMin + 1e-6);
+
+  const tb = new Engine();
+  tb.ships[0].hp = 50; tb.ships[1].hp = 50; tb.ships[0].damageDealt = 10;
+  t.ok('tiebreak by damage when HP tied', tb._tiebreak() === 0);
+  tb.ships[0].hp = 30;
+  t.ok('tiebreak by HP first', tb._tiebreak() === 1);
+
+  // per-viewer log tagging: you see your own fire + hits on you, never enemy fire
+  const gl = new Engine();
+  gl.ships[0].pos = V.of(0, 0, 0); gl.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }];
+  gl.ships[1].pos = V.of(10, 0, 0); gl.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }];
+  for (let i = 0; i < 3; i++) {
+    gl.submitPlan(0, { move: V.of(), weapon: i === 0 ? 'laser' : 'none', aim: V.of(10, 0, 0) });
+    gl.submitPlan(1, { move: V.of(), weapon: 'none' });
+    gl.resolve();
+  }
+  t.ok('every log entry is tagged to a player', gl.log.length > 0 && gl.log.every((e) => e.to === 0 || e.to === 1));
+  t.ok('fire entries tagged to the firer (P0)', gl.log.filter((e) => /You fire/.test(e.msg)).every((e) => e.to === 0));
+  t.ok('hit entries tagged to the victim (P1)', gl.log.filter((e) => /hits you/.test(e.msg)).every((e) => e.to === 1));
+})();
+
+/* ===================== viewmodel: no center axes, fair framing, scenes ===================== */
+(() => {
+  const g = new Engine();
+  const bd = View.backdrop(CONFIG.arenaRadius0, false);
+  t.ok('backdrop has NO world axes (removed)', !bd.some((p) => p.type === 'axes'));
+  t.ok('backdrop has grid + sphere + starfield', ['grid', 'sphere', 'starfield'].every((tp) => bd.some((p) => p.type === tp)));
+
+  // before contact: NO SIGNAL label, no enemy ghost ship
+  const early = View.buildPlanScene(g, 0, { move: V.of(), weapon: 'none' }, {});
+  t.ok('pre-contact shows NO SIGNAL', early.primitives.some((p) => p.type === 'label' && /NO SIGNAL/.test(p.text)));
+  t.ok('pre-contact draws no enemy ghost ship', !early.primitives.some((p) => p.type === 'ship' && p.ghost));
+
+  // camera framing must use the APPARENT enemy, never the true (hidden) position.
+  // Move the enemy (P1) in +y while P0 stays put and observes.
+  for (let i = 0; i < 12; i++) {
+    g.submitPlan(0, { move: V.of(), weapon: 'none' });
+    g.submitPlan(1, { move: V.of(0, 3, 0), weapon: 'none' });
+    g.resolve();
+  }
+  const ob = g.observeEnemy(0);
+  const scene = View.buildPlanScene(g, 0, { move: V.of(), weapon: 'none' }, {});
+  t.ok('enemy now visible as a delayed ghost', ob.visible && scene.primitives.some((p) => p.type === 'ship' && p.ghost));
+  t.ok('contact shows age badge', scene.primitives.some((p) => p.type === 'label' && /light T−/.test(p.text)));
+  t.ok('uncertainty bubble drawn', scene.primitives.some((p) => p.type === 'bubble'));
+  const apparentMidY = (g.ships[0].pos.y + ob.pos.y) / 2;
+  const trueMidY = (g.ships[0].pos.y + g.ships[1].pos.y) / 2;
+  t.ok('camera frames the APPARENT enemy, not the true position',
+    Math.abs(scene.target.y - apparentMidY) < Math.abs(scene.target.y - trueMidY) - 1,
+    `target.y=${scene.target.y.toFixed(1)} apparent=${apparentMidY.toFixed(1)} true=${trueMidY.toFixed(1)}`);
+
+  // replay scene builds with ship trails and does not throw
+  const rep = View.buildReplayScene(g, g.turn * 0.5);
+  t.ok('replay scene builds', rep.primitives.length > 5);
+  t.ok('replay includes ship trajectory lines', rep.primitives.some((p) => p.type === 'line'));
+})();
+
+process.exit(t.report() ? 0 : 1);

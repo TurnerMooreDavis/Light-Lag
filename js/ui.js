@@ -53,7 +53,8 @@
 
   /* pass-device curtain */
   UI.passTo = function (player, onReady) {
-    this._animGen++; // kill any running replay animation before a planning hand-off
+    this._animGen++;      // kill any running replay animation before a planning hand-off
+    this._stopFF();       // and any running fast-forward
     const c = this.refs;
     c.curtainWho.textContent = 'PLAYER ' + (player + 1);
     c.curtainWho.className = 'who ' + (player === 0 ? 'p1' : 'p2');
@@ -166,6 +167,16 @@
     r.warn = el('div', { class: 'muted danger', style: 'margin-top:6px;' }, ['']);
     eSec.appendChild(r.warn);
     root.appendChild(eSec);
+
+    // DEBUG · FAST-FORWARD (advance N idle turns at 1/sec to observe light-lag)
+    const dSec = el('div', { class: 'sec' }, [el('h3', null, ['Debug'])]);
+    const ffRow = el('div', { class: 'row' }, [el('label', null, ['FF turns'])]);
+    const ffNum = el('input', { type: 'number', min: 1, max: 60, step: 1, value: 10 });
+    const ffBtn = el('button', { onclick: () => this.fastForward(parseInt(ffNum.value, 10)) }, ['⏩ FAST-FORWARD']);
+    ffRow.appendChild(ffNum); ffRow.appendChild(ffBtn);
+    dSec.appendChild(ffRow);
+    dSec.appendChild(el('div', { class: 'muted' }, ['advance N turns with both ships idle, 1 turn/sec']));
+    root.appendChild(dSec);
 
     // LOG
     const lSec = el('div', { class: 'sec' }, [el('h3', null, ['Battle Log'])]);
@@ -347,6 +358,64 @@
       if (gtime < g.turn) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
+  };
+
+  /* ---------- fast-forward (debug) ----------
+   * Advance `n` turns with both players idle, one turn per second, rendering the
+   * current player's (delayed) sensor view so light-lag can be observed. */
+  UI.fastForward = function (n) {
+    n = Math.max(0, Math.min(60, Math.floor(n || 0)));
+    if (n <= 0 || this.game.phase !== 'plan') return;
+    this._ffRemaining = n;
+    this._ffActive = true;
+    this._animGen++;
+    this._showFFPanel();
+    this._ffStep();
+  };
+
+  UI._ffStep = function () {
+    if (!this._ffActive) return;
+    if (this._ffRemaining <= 0 || this.game.phase === 'gameover') { this._ffEnd(); return; }
+    this.game.idleTurn();
+    this._ffRemaining--;
+    this._renderFF();
+    if (this._ffRemaining > 0 && this.game.phase !== 'gameover') {
+      this._ffTimer = setTimeout(() => this._ffStep(), 1000); // 1 turn / second
+    } else {
+      this._ffEnd();
+    }
+  };
+
+  UI._stopFF = function () {
+    this._ffActive = false;
+    if (this._ffTimer) { clearTimeout(this._ffTimer); this._ffTimer = null; }
+  };
+
+  UI._ffEnd = function () {
+    const over = this.game.phase === 'gameover';
+    this._stopFF();
+    if (over) { this.gameOver(); return; }
+    this.passTo(0, () => this.beginPlanning(0));
+  };
+
+  UI._renderFF = function () {
+    this.refs.turn.textContent = 'TURN ' + this.game.turn;
+    this.refs.phase.textContent = 'FAST-FWD · ' + this._ffRemaining + ' left';
+    this.refs.phase.className = 'phase resolve';
+    if (this._ffStatus) this._ffStatus.textContent = `advancing… turn ${this.game.turn}, ${this._ffRemaining} remaining`;
+    const { primitives, target } = View.buildPlanScene(this.game, this.player, { move: V.of(), weapon: 'none', shield: 0 }, {});
+    this.renderer.setScene(primitives, target);
+  };
+
+  UI._showFFPanel = function () {
+    document.body.className = '';
+    const root = this.refs.console; root.innerHTML = '';
+    const sec = el('div', { class: 'sec' }, [el('h3', null, ['Fast-Forward (debug)'])]);
+    this._ffStatus = el('div', { class: 'muted' }, ['advancing…']);
+    sec.appendChild(this._ffStatus);
+    const stop = el('button', { class: 'primary', style: 'width:100%;padding:10px;margin-top:8px;', onclick: () => { this._ffRemaining = 0; this._ffEnd(); } }, ['■ STOP']);
+    sec.appendChild(stop);
+    root.appendChild(sec);
   };
 
   UI.gameOver = function () {

@@ -68,8 +68,13 @@ Both players plan **simultaneously and in secret**, then the turn resolves toget
    shot what, and any hits — before the next turn.
 
 **Camera:** drag to orbit, scroll to zoom, and use the `ISO / TOP / FRONT / SIDE`
-buttons to read 3D depth cleanly. Every object drops a shadow line to the floor
-plane to anchor it in space.
+buttons to read 3D depth cleanly. A small **orientation sphere** in the top-right
+corner (under those buttons) shows which way X/Y/Z currently point. Every object
+also drops a shadow line to the floor plane to anchor it in space.
+
+**Fast-forward (debug):** the console's Debug panel advances *N* turns with both
+ships idle, at one turn per second — handy for watching the enemy's first light
+arrive at turn 10, or stepping the simulation while inspecting behaviour.
 
 **Winning:** destroy the enemy ship (100 HP). If nobody dies by turn 40, the arena
 begins to **shrink** — forcing the ships together until the light-lag is small
@@ -105,6 +110,25 @@ runs straight from `file://`.
 | `js/render.js` | generic 3D→2D canvas renderer (depth-sorted painter's algorithm) |
 | `js/ui.js` | tactical console, planning input, hotseat phase machine |
 | `js/main.js` | bootstrap |
+
+## Tests
+
+```
+npm install   # dev-only: jsdom, for the headless DOM tests
+npm test      # unit suite + jsdom end-to-end suite (~113 checks)
+```
+
+- `tests/unit.test.js` — DOM-free coverage of vec3, camera, physics (the
+  retarded-time solver, intercept, swept collision), the engine (resolution,
+  energy budget, shields, overkill, overtime/tiebreak, idle/fast-forward,
+  per-viewer log), and the view model (no center axes, fair camera framing).
+- `tests/e2e.test.js` — drives the real DOM/render/UI under jsdom: a full duel,
+  fairness of the per-viewer log, the post-game truth replay, fast-forward, and
+  the corner gizmo.
+
+The runtime game itself has **no dependencies** — `npm install` is only for tests.
+
+## How it works
 
 The retarded-time solver is the heart of it. For an observer at `O` at turn `T`,
 it finds the emission time `t_e` where the enemy's light reaches you now:
