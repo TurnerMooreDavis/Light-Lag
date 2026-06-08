@@ -158,6 +158,28 @@ const { Runner, loadPage } = require('./harness');
   let dlErr = null; try { UI.downloadGameLog(); } catch (e) { dlErr = e; }
   t.ok('downloadGameLog runs without throwing', !dlErr, dlErr && dlErr.stack);
 
+  // ---------- god-mode fast-forward: the AI keeps acting (toggle); the player coasts ----------
+  UI.showMenu();
+  startMode(/VS HUNTER/);
+  doc.getElementById('curtainGodBtn').click(); // enter god mode at turn 0
+  const aiToggle = () => Array.from(doc.querySelectorAll('#console label')).find((l) => /AI keeps acting/i.test(l.textContent));
+  t.ok('vs-ai god panel offers an "AI keeps acting" toggle', !!aiToggle());
+  t.ok('the toggle defaults to ON', UI._ffAiActs === true);
+  const runFF = (n) => { doc.querySelector('#console input[type=number]').value = String(n); Array.from(doc.querySelectorAll('#console button')).find((b) => /FAST-FORWARD/.test(b.textContent)).click(); flushRaf(160); };
+  // a fleeing player who's only coasting
+  game.ships[0].vel = V.of(0, 2, 0);
+  const aiStart = V.clone(game.ships[1].pos), humanStartY = game.ships[0].pos.y;
+  runFF(6);
+  t.ok('fast-forward advanced 6 turns', game.turn === 6);
+  t.ok('with the toggle ON the AI keeps maneuvering (pursues)', game.ships[1].pos.x < aiStart.x - 1);
+  t.ok('the player just coasts on momentum during fast-forward', V.eq(game.ships[0].vel, V.of(0, 2, 0), 1e-9) && game.ships[0].pos.y > humanStartY + 1);
+  // turn the AI off and fast-forward again: the AI must stop thrusting (coast only)
+  const tcb = aiToggle().querySelector('input[type=checkbox]'); tcb.checked = false; tcb.dispatchEvent(new window.Event('change'));
+  t.ok('toggle OFF recorded', UI._ffAiActs === false);
+  const aiVelFrozen = V.clone(game.ships[1].vel);
+  runFF(4);
+  t.ok('with the toggle OFF the AI no longer thrusts (velocity unchanged)', V.eq(game.ships[1].vel, aiVelFrozen, 1e-9));
+
   t.ok('no uncaught window errors during e2e', errors.length === 0, errors.join(' | '));
   process.exit(t.report() ? 0 : 1);
 })();

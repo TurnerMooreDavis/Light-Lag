@@ -27,6 +27,7 @@
     mode: 'hotseat',   // 'hotseat' (2 players) | 'ai' (vs computer)
     aiType: 'hunter',  // which AI personality when mode === 'ai'
     aiPlayer: 1,       // the computer is always player 2
+    _ffAiActs: true,   // god-mode toggle: does the AI keep playing during fast-forward?
   };
 
   UI.init = function (game, renderer) {
@@ -138,7 +139,14 @@
     const ffBtn = el('button', { onclick: () => this.fastForward(parseInt(ffNum.value, 10)) }, ['⏩ FAST-FORWARD']);
     ffRow.appendChild(ffNum); ffRow.appendChild(ffBtn);
     sec.appendChild(ffRow);
-    sec.appendChild(el('div', { class: 'muted' }, ['advance N turns with both ships idle, 1 turn/sec']));
+    sec.appendChild(el('div', { class: 'muted' }, ['advance N turns at 1 turn/sec — players coast (no input)' + (this.mode === 'ai' ? '' : '; both ships idle')]));
+    if (this.mode === 'ai') {
+      const lbl = el('label', { class: 'muted', style: 'display:flex;gap:6px;align-items:center;margin-top:6px;cursor:pointer;' }, []);
+      const cb = el('input', { type: 'checkbox' }); cb.checked = this._ffAiActs;
+      cb.addEventListener('change', () => { this._ffAiActs = cb.checked; });
+      lbl.appendChild(cb); lbl.appendChild(document.createTextNode('AI keeps acting during fast-forward'));
+      sec.appendChild(lbl);
+    }
     root.appendChild(sec);
     const exitSec = el('div', { class: 'sec' }, []);
     exitSec.appendChild(el('button', { class: 'primary', style: 'width:100%;padding:10px;', onclick: () => this.exitGodMode() }, ['◀ EXIT GOD MODE']));
@@ -470,10 +478,24 @@
     this._ffStep();
   };
 
+  // one fast-forward turn: the AI keeps planning (unless toggled off); humans
+  // always coast, since they can't input mid-fast-forward.
+  UI._ffTurn = function () {
+    const g = this.game;
+    for (let i = 0; i < 2; i++) {
+      if (this.mode === 'ai' && i === this.aiPlayer && this._ffAiActs) {
+        g.submitPlan(i, window.LL.AI.decide(this.aiType, g.viewFor(i)));
+      } else {
+        g.submitPlan(i, { accel: V.of(), weapon: 'none', shield: 0 });
+      }
+    }
+    return g.resolve();
+  };
+
   UI._ffStep = function () {
     if (!this._ffActive) return;
     if (this._ffRemaining <= 0 || this.game.phase === 'gameover') { this._ffEnd(); return; }
-    this.game.idleTurn();                 // resolve one turn (records lastReport)
+    this._ffTurn();                       // resolve one turn (AIs act, humans coast)
     this._ffRemaining--;
     this.refs.turn.textContent = 'TURN ' + this.game.turn;
     this.refs.phase.textContent = 'FAST-FWD · ' + this._ffRemaining + ' left';
@@ -558,8 +580,21 @@
     const log = g.exportLog({ mode: this.mode, aiType: this.mode === 'ai' ? this.aiType : null });
     window.LL.lastGameLog = log;
     try { console.log('[Light Lag] game log →', log); } catch (e) { /* ignore */ }
+    this.postGameLog(log); // always persist to the server's logs/ folder when one is running
 
     this.playReplay(); // auto-roll the reveal once
+  };
+
+  // Fire-and-forget POST so every finished game is written to ./logs by the dev
+  // server (server.js). Harmless when served statically / from file:// — the
+  // download button + console log are the fallback.
+  UI.postGameLog = function (log) {
+    try {
+      if (typeof fetch !== 'function') return;
+      fetch('/api/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(log) })
+        .then((r) => r.json()).then((j) => { if (j && j.file) console.log('[Light Lag] log saved → logs/' + j.file); })
+        .catch(() => { /* no log endpoint (static server / file://) */ });
+    } catch (e) { /* ignore */ }
   };
 
   UI.downloadGameLog = function () {

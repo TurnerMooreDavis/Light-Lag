@@ -61,13 +61,28 @@ fleeing in 50 random straight-line directions and asserts it kills them every
 time (it wins because a straight-line runner gets pinned against the wall and
 the overtime arena closes in — at equal top speed it can't be out-run forever).
 
+## Running it
+
+The game needs no server — just open `index.html`. But to have every finished
+game **written to `./logs/` automatically**, serve it with the bundled Node dev
+server (no dependencies):
+
+```
+npm start            # http://localhost:3000, logs -> ./logs/
+PORT=8080 npm start
+```
+
+On game over the client POSTs its log to `/api/log` and the server saves it as
+`logs/game-<timestamp>-t<turns>-w<winner>.json`. (Opened from `file://` or a
+plain static server, the download button + console are the fallback.)
+
 ## Game logs
 
-Every match records a complete, JSON-serializable log. On the game-over screen,
-**Download Game Log** saves it; it's also `console.log`ged and stashed at
-`window.LL.lastGameLog`, and `game.exportLog()` is callable anytime. Each entry
-has the config, both ships' start, the outcome, and per turn: both players'
-orders (`accel`/`weapon`/`aim`/`shield`), the end-of-turn truth `state`
+Every match records a complete, JSON-serializable log via `game.exportLog()`
+(callable anytime; also stashed at `window.LL.lastGameLog` and `console.log`ged
+on game over, with a **Download Game Log** button). Each has the config, both
+ships' start, the outcome, and per turn: both players' orders
+(`accel`/`weapon`/`aim`/`shield`), the end-of-turn truth `state`
 (`pos`/`vel`/`hp`), plus `spawns`/`hits`/`destroyed`.
 
 ## How to play (hotseat)
@@ -104,10 +119,11 @@ also drops a shadow line to the floor plane to anchor it in space.
 **God mode (debug):** from the start-of-turn curtain, *Enter God Mode* shows an
 omniscient view — every object from both players at its true position (it's the
 one place light-delay is bypassed, on purpose). Its **fast-forward** advances
-*N* turns with both ships idle at one turn per second, and **animates each turn's
-resolution** — ships glide, projectiles fly their paths, and hits burst — so you
-can watch the simulation play out. Handy for seeing the enemy's first light
-arrive at turn 10 or stepping through behaviour.
+*N* turns at one turn per second and **animates each turn's resolution** — ships
+glide, projectiles fly their paths, and hits burst. Human players always **coast**
+through fast-forward (no input mid-FF); in *Vs Computer* a toggle keeps the **AI
+acting** during fast-forward (default) or freezes it. Handy for watching the AI
+hunt, seeing first light arrive at turn 10, or stepping through behaviour.
 
 **Winning:** destroy the enemy ship (100 HP). If nobody dies by turn 40, the arena
 begins to **shrink** — forcing the ships together until the light-lag is small
