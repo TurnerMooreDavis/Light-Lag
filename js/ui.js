@@ -197,7 +197,7 @@
     const ob = g.observeEnemy(p);
     const sensor = ob.visible
       ? `SIGNAL · enemy light is T−${ob.age.toFixed(1)} old`
-      : `NO SIGNAL · first light ≈ turn ${ob.arrivesAt != null ? Math.ceil(ob.arrivesAt) : '?'}`;
+      : `NO SIGNAL · enemy location unknown`;
     root.appendChild(el('div', { class: 'sec' }, [
       el('h3', null, ['Ship Status']),
       statLine('HULL', `${me.hp.toFixed(0)} / ${CFG.startHP}`),
@@ -328,10 +328,11 @@
     return sol.ok ? sol.aim : null;
   };
   UI.apparentAim = function () {
-    // aim at exactly what you SEE — the light-delayed image (or start intel).
+    // aim at exactly what you SEE — the light-delayed image. Blind (no signal),
+    // the enemy's position is unknown, so default to the arena centre.
     // Leading the target is the explicit job of the FIRING SOLUTION button.
     const v = this.game.viewFor(this.player);
-    return v.enemy.visible ? V.clone(v.enemy.pos) : V.clone(v.enemyIntel);
+    return v.enemy.visible ? V.clone(v.enemy.pos) : V.of();
   };
   UI.selectWeapon = function (key) {
     this.plan.weapon = key;
@@ -339,10 +340,10 @@
     this.buildConsole();
   };
   UI.setAccelToward = function (sign) {
-    // thrust toward/away from the VISIBLE image (or start intel) — never the
-    // enemy's true current position.
+    // thrust toward/away from the VISIBLE image — never the enemy's true current
+    // position. Blind, the enemy is unknown, so steer relative to the arena centre.
     const v = this.game.viewFor(this.player);
-    const tgt = v.enemy.visible ? v.enemy.pos : v.enemyIntel;
+    const tgt = v.enemy.visible ? v.enemy.pos : V.of();
     let dir = V.normalize(V.sub(tgt, v.me.pos));
     if (V.len2(dir) < 1e-6) dir = V.of(1, 0, 0);
     this.plan.accel = V.scale(dir, sign * CFG.maxAccel);
@@ -361,8 +362,9 @@
       const incoming = v.projectiles.find((pv) => !pv.own);
       if (incoming) { this.plan.shieldDir = V.add(incoming.pos, V.scale(incoming.vel, incoming.age || 0)); this.onPlanChanged(); return; }
     }
-    // otherwise face the enemy's visible image (or start intel) — never their true pos
-    this.plan.shieldDir = v.enemy.visible ? V.clone(v.enemy.pos) : V.clone(v.enemyIntel);
+    // otherwise face the enemy's visible image — never their true pos. Blind, the
+    // enemy's bearing is unknown, so default the cone toward the arena centre.
+    this.plan.shieldDir = v.enemy.visible ? V.clone(v.enemy.pos) : V.of();
     this.onPlanChanged();
   };
 

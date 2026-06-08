@@ -19,8 +19,10 @@
   }
 
   /* ---- shared helpers — all operate ONLY on the sanctioned view ---- */
-  // where we believe the enemy is: the visible (delayed) image, or pre-battle intel
-  const targetPoint = (view) => (view.enemy.visible ? view.enemy.pos : view.enemyIntel);
+  // where we head: the visible (delayed) image if we have one, else — since the
+  // enemy's start is unknown — the arena centre (a neutral public landmark the
+  // shrinking arena converges on anyway). No enemy info is used while blind.
+  const targetPoint = (view) => (view.enemy.visible ? view.enemy.pos : V.of());
   const unitToward = (from, to) => {
     const d = V.sub(to, from), l = V.len(d);
     return l > 1e-6 ? V.scale(d, 1 / l) : V.of(1, 0, 0);

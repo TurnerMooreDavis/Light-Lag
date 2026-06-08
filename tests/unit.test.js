@@ -83,7 +83,22 @@ const t = new Runner('unit');
 /* ===================== engine: setup, budget, resolution ===================== */
 (() => {
   const g = new Engine();
-  t.approx('ships start 100u apart', V.dist(g.ships[0].pos, g.ships[1].pos), 100, 1e-6);
+  // starts are RANDOMIZED each game: at least startDistance apart, both inside the arena
+  let minSep = Infinity, maxSep = 0, allInside = true;
+  for (let i = 0; i < 200; i++) {
+    const gg = new Engine();
+    const d = V.dist(gg.ships[0].pos, gg.ships[1].pos);
+    minSep = Math.min(minSep, d); maxSep = Math.max(maxSep, d);
+    if (V.len(gg.ships[0].pos) > CONFIG.arenaRadius0 || V.len(gg.ships[1].pos) > CONFIG.arenaRadius0) allInside = false;
+  }
+  t.ok('randomized starts are always >= startDistance apart', minSep >= CONFIG.startDistance - 1e-9, 'minSep=' + minSep.toFixed(2));
+  t.ok('randomized starts actually vary (not a fixed pair)', maxSep - minSep > 1e-6);
+  t.ok('randomized starts stay inside the arena', allInside);
+  t.ok('explicit starts override randomization (deterministic tests)',
+    V.eq(new Engine({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] }).ships[0].pos, V.of(-50, 0, 0)));
+  t.ok('a seeded rng makes starts reproducible',
+    V.eq(new Engine({ rng: (() => { let s = 7; return () => (s = (s * 9301 + 49297) % 233280) / 233280; })() }).ships[0].pos,
+         new Engine({ rng: (() => { let s = 7; return () => (s = (s * 9301 + 49297) % 233280) / 233280; })() }).ships[0].pos));
   t.ok('plan within budget valid', g.planValid({ accel: V.of(2, 0, 0), weapon: 'torpedo', shield: 0 }));
   t.ok('over-budget plan invalid', !g.planValid({ accel: V.of(3, 0, 0), weapon: 'laser', shield: 8 }));
   t.ok('over-speed plan invalid', !g.planValid({ accel: V.of(9, 0, 0), weapon: 'none' }));
@@ -106,7 +121,8 @@ const t = new Runner('unit');
 
 /* ===================== engine: idle turn / first contact (fast-forward core) ===================== */
 (() => {
-  const g = new Engine();
+  // explicit 100u start so the light-front timing (first contact at turn 10) is exact
+  const g = new Engine({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] });
   let firstSeen = null, movedWhileIdle = false;
   const startA = V.clone(g.ships[0].pos), startB = V.clone(g.ships[1].pos);
   for (let i = 0; i < 15; i++) {
@@ -263,15 +279,22 @@ const t = new Runner('unit');
 
 /* ===================== viewmodel: no center axes, fair framing, scenes ===================== */
 (() => {
-  const g = new Engine();
+  // explicit symmetric starts so light timing is deterministic in this block
+  const g = new Engine({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] });
   const bd = View.backdrop(CONFIG.arenaRadius0, false);
   t.ok('backdrop has NO world axes (removed)', !bd.some((p) => p.type === 'axes'));
   t.ok('backdrop has grid + sphere + starfield', ['grid', 'sphere', 'starfield'].every((tp) => bd.some((p) => p.type === tp)));
 
-  // before contact: NO SIGNAL label, no enemy ghost ship
+  // before contact: NO SIGNAL label, no enemy ghost ship, and NO enemy-position hint
   const early = View.buildPlanScene(g, 0, { accel: V.of(), weapon: 'none' }, {});
   t.ok('pre-contact shows NO SIGNAL', early.primitives.some((p) => p.type === 'label' && /NO SIGNAL/.test(p.text)));
   t.ok('pre-contact draws no enemy ghost ship', !early.primitives.some((p) => p.type === 'ship' && p.ghost));
+  // the only non-own primitives pre-contact are the backdrop + own-ship markers: nothing
+  // is drawn anywhere near the (hidden) enemy start position.
+  const enemyStart = g.ships[1].pos;
+  t.ok('pre-contact draws nothing at/near the hidden enemy position',
+    !early.primitives.some((p) => p.pos && V.dist(p.pos, enemyStart) < CONFIG.maxSpeed));
+  t.ok('pre-contact camera frames own ship only (no enemy guess)', V.eq(early.target, g.ships[0].pos));
 
   // camera framing must use the APPARENT enemy, never the true (hidden) position.
   // Move the enemy (P1) in +y while P0 stays put and observes.
@@ -331,7 +354,6 @@ const t = new Runner('unit');
     player: 1, turn: 12, arenaRadius: CONFIG.arenaRadius0, overtime: false,
     me: { pos: V.of(0, 0, 0), vel: V.of() },
     enemy: { visible: true, pos: V.of(50, 0, 0), vel: V.of(0, 0, 0), age: 5 }, // within strike range
-    enemyIntel: V.of(50, 0, 0),
     projectiles: [],
   }, over || {});
 
@@ -352,10 +374,11 @@ const t = new Runner('unit');
   t.ok('hunter raises shields vs an incoming shot', p.shield > 0 && !!p.shieldDir);
   t.ok('hunter still affordable while shielding+firing', new Engine().planValid(p));
 
-  // Hunter: blind (no light yet) -> holds fire, still closes on intel
-  p = AI.decide('hunter', mkView({ enemy: { visible: false }, enemyIntel: V.of(100, 0, 0) }));
+  // Hunter: blind (no light yet, start unknown) -> holds fire, searches toward the
+  // arena centre (the neutral landmark) — never toward any leaked enemy position
+  p = AI.decide('hunter', mkView({ me: { pos: V.of(-30, 0, 0), vel: V.of() }, enemy: { visible: false } }));
   t.ok('hunter holds fire when blind', p.weapon === 'none');
-  t.ok('hunter still closes toward intel when blind', V.dot(p.accel, V.of(1, 0, 0)) > 0);
+  t.ok('hunter searches toward the arena centre when blind', V.dot(p.accel, V.of(1, 0, 0)) > 0);
 
   // Hunter: SEEK steering cancels perpendicular momentum (turns in, doesn't just thrust at the point)
   p = AI.decide('hunter', mkView({ me: { pos: V.of(0, 0, 0), vel: V.of(0, CONFIG.maxSpeed, 0) }, enemy: { visible: true, pos: V.of(40, 0, 0), vel: V.of(), age: 1 } }));
@@ -376,7 +399,8 @@ const t = new Runner('unit');
 
 /* ===================== fairness: enemy TRUE position is never exposed to a player ===================== */
 (() => {
-  const g = new Engine();
+  // explicit starts so the enemy reliably becomes visible within the loop
+  const g = new Engine({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] });
   // reach a state where the enemy is visible as a moving, delayed image
   for (let i = 0; i < 14; i++) { g.submitPlan(0, { accel: V.of(), weapon: 'none' }); g.submitPlan(1, { accel: V.of(0, 2, 0), weapon: 'none' }); g.resolve(); }
   t.ok('precondition: enemy visible as a delayed image', g.observeEnemy(0).visible);
@@ -394,10 +418,15 @@ const t = new Runner('unit');
 
   const v = g.viewFor(0);
   t.ok('viewFor.enemy is exactly the delayed image (no true pos)', JSON.stringify(v.enemy) === JSON.stringify(g.observeEnemy(0)));
-  t.ok('viewFor.enemyIntel is the start position, not current', V.eq(v.enemyIntel, g.ships[1].history[0].pos));
+  t.ok('viewFor exposes NO start intel (randomized & secret)', !('enemyIntel' in v));
   t.ok('delayed image is NOT the poisoned true position', V.dist(v.enemy.pos, g.ships[1].pos) > 1000);
-  const towardTgt = v.enemy.visible ? v.enemy.pos : v.enemyIntel; // how setAccelToward/AT-IMAGE pick their target
+  const towardTgt = v.enemy.visible ? v.enemy.pos : V.of(); // how setAccelToward/AT-IMAGE pick their target
   t.ok('TOWARD/AT-IMAGE targets the visible image, not true pos', V.dist(towardTgt, g.ships[1].pos) > 1000);
+
+  // BLIND viewer leaks nothing positional: no image, no start, no range/ETA
+  const blind = new Engine({ starts: [V.of(-60, 0, 0), V.of(60, 0, 0)] }).viewFor(0);
+  t.ok('blind view: enemy not visible', blind.enemy.visible === false);
+  t.ok('blind view leaks no enemy position/range', blind.enemy.oldest === undefined && blind.enemy.arrivesAt === undefined && blind.enemy.pos === undefined && !('enemyIntel' in blind));
 
   // observeProjectiles must expose sanitized entries only (no live projectile reference)
   const g3 = new Engine(); g3.turn = 5;
@@ -420,7 +449,8 @@ const t = new Runner('unit');
   const RUNS = 50;
   let aiWins = 0, kills = 0, maxTurn = 0, worst = null;
   for (let run = 0; run < RUNS; run++) {
-    const g = new Engine(); const dir = randDir(); let guard = 0;
+    // randomized (but seeded -> reproducible) start positions AND flee direction
+    const g = new Engine({ rng: rnd }); const dir = randDir(); let guard = 0;
     while (g.phase !== 'gameover' && guard++ < 250) {
       g.submitPlan(0, { accel: V.scale(dir, CONFIG.maxAccel), weapon: 'none', shield: 0 }); // player flees straight, never fights
       g.submitPlan(1, LL.AI.decide('hunter', g.viewFor(1)));                                 // Hunter pursues

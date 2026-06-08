@@ -21,9 +21,12 @@ const { Runner, loadPage } = require('./harness');
   const startMode = (re) => { Array.from(doc.querySelectorAll('#menuButtons button')).find((b) => re.test(b.textContent)).click(); };
   startMode(/2 PLAYERS/);
   t.ok('choosing 2 players opens the pass-device curtain', doc.getElementById('curtain').classList.contains('show'));
+  // pin deterministic symmetric starts for the scripted duel (starts are otherwise randomized)
+  game.reset({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] });
   const towardDir = (p) => {
     const ob = game.observeEnemy(p), me = game.ship(p);
-    const tgt = ob.visible ? V.add(ob.pos, V.scale(ob.vel, ob.age || 0)) : game.ships[1 - p].history[0].pos;
+    // blind => steer toward the arena centre (no enemy position is known)
+    const tgt = ob.visible ? V.add(ob.pos, V.scale(ob.vel, ob.age || 0)) : V.of();
     const d = V.normalize(V.sub(tgt, me.pos));
     return V.len2(d) > 1e-6 ? d : V.of(1, 0, 0);
   };
@@ -139,7 +142,7 @@ const { Runner, loadPage } = require('./harness');
   t.ok('vs-ai opens straight to the human turn (no player-2 hand-off)', doc.getElementById('curtain').classList.contains('show'));
   let aiErr = null, humanTurns = 0, perTurnLogOk = true;
   try {
-    for (let i = 0; i < 40 && game.phase !== 'gameover'; i++) {
+    for (let i = 0; i < 100 && game.phase !== 'gameover'; i++) {
       clickCurtain();                                  // human readies — there is no second curtain
       planAndCommit(0, { weapon: 'laser', toward: true }); // commit triggers AI plan + resolve
       humanTurns++;
@@ -169,8 +172,10 @@ const { Runner, loadPage } = require('./harness');
   t.ok('vs-ai god panel offers an "AI keeps acting" toggle', !!aiToggle());
   t.ok('the toggle defaults to ON', UI._ffAiActs === true);
   const runFF = (n) => { doc.querySelector('#console input[type=number]').value = String(n); Array.from(doc.querySelectorAll('#console button')).find((b) => /FAST-FORWARD/.test(b.textContent)).click(); flushRaf(160); };
-  // a fleeing player who's only coasting
-  game.ships[0].vel = V.of(0, 2, 0);
+  // pin deterministic starts: human at origin coasting +y, AI off to +x so its
+  // pursuit (toward the centre / the human's image) is a clear -x move.
+  game.ships[0].pos = V.of(0, 0, 0); game.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }]; game.ships[0].vel = V.of(0, 2, 0);
+  game.ships[1].pos = V.of(80, 0, 0); game.ships[1].history = [{ t: 0, pos: V.of(80, 0, 0) }]; game.ships[1].vel = V.of();
   const aiStart = V.clone(game.ships[1].pos), humanStartY = game.ships[0].pos.y;
   runFF(6);
   t.ok('fast-forward advanced 6 turns', game.turn === 6);

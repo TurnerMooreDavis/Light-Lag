@@ -12,15 +12,17 @@ No build step, no dependencies. **Just open `index.html` in any modern browser.*
 ## The idea
 
 The board is a 3D grid. Light travels **10 units per turn** (`c = 10`). The two
-ships start **100 units apart**, so light takes **10 turns** to cross the gap.
+ships spawn at **randomized positions, at least 100 units apart**, so light takes
+**10+ turns** to cross the gap — and where the enemy starts is *secret*.
 
 That means:
 
-- For the first **10 turns you are blind** — your opponent's light hasn't reached
-  you yet. You know only where they *started* (pre-battle intel).
-- After that, you see a **10-turn-old image** of a stationary enemy. If they move,
-  the image lags even more, and the *image* itself shows where they *were*, not
-  where they *are*.
+- For the first **~10 turns you are completely blind** — your opponent's light
+  hasn't reached you yet, and there is **no pre-battle intel**: you have *no idea*
+  where they are (not even a bearing or a range). All you can do is search.
+- Once their light finally arrives you see a **10-turn-old image** of a stationary
+  enemy. If they move, the image lags even more, and the *image* itself shows where
+  they *were*, not where they *are*.
 - A ship can be anywhere inside an **uncertainty bubble** (radius = their top
   speed × the image's age) around where you see them. The game draws this bubble.
 
@@ -138,7 +140,9 @@ enough that hits become reliable. Ties break on HP, then total damage dealt.
 
 - **Your ship** — known exactly (cyan for P1, amber for P2).
 - **Enemy** — only ever the light-delayed image, tagged `light T−N`, wrapped in
-  its uncertainty bubble. Before first contact: `NO SIGNAL · first light ≈ turn N`.
+  its uncertainty bubble. Before first contact there is **no enemy marker at all**,
+  just `NO SIGNAL · enemy location unknown` — their start is randomized and secret,
+  so nothing on screen hints at where they are or how far off.
 - **Firing solution** — the yellow lead point, *if they hold course*.
 - **Your own shots** — tracked live (you have telemetry on your own ordnance).
 - **Incoming torpedoes** — shown as a delayed image plus an extrapolated

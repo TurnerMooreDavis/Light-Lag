@@ -7,7 +7,7 @@
 
   const CONFIG = {
     c: 10,                 // speed of light, grid-units per turn (THE load-bearing constant)
-    startDistance: 100,    // ships begin this far apart => 10-turn light blackout at start
+    startDistance: 100,    // ships begin AT LEAST this far apart (randomized) => >=10-turn blackout
     // shrinking arena (a sphere, ships clamped inside). Overtime forces engagement.
     arenaRadius0: 160,     // starting boundary radius
     arenaRadiusMin: 18,    // walls stop closing here
@@ -31,6 +31,25 @@
   let _pid = 1;
   const nextId = () => _pid++;
 
+  // Uniform random unit vector (uniform on the sphere). rng() -> [0,1).
+  function randomDir(rng) {
+    const z = 2 * rng() - 1, t = 2 * Math.PI * rng(), s = Math.sqrt(Math.max(0, 1 - z * z));
+    return V.of(s * Math.cos(t), s * Math.sin(t), z);
+  }
+  // Randomized start positions: a random orientation + separation (>= startDistance)
+  // about a random midpoint, with both ships kept comfortably inside the arena.
+  // Shifting BOTH ships by the same midpoint offset preserves their separation, so
+  // the >= startDistance guarantee holds exactly without rejection sampling.
+  function randomStarts(rng) {
+    const r = rng || Math.random;
+    const dir = randomDir(r);
+    const sep = CONFIG.startDistance + r() * 40;          // 100..140 units apart
+    const half = sep / 2;
+    const maxOff = Math.max(0, CONFIG.arenaRadius0 - 12 - half); // keep both inside the wall
+    const off = V.scale(randomDir(r), r() * maxOff);
+    return [V.add(off, V.scale(dir, -half)), V.add(off, V.scale(dir, half))];
+  }
+
   function makeShip(owner, pos) {
     return {
       id: nextId(), kind: 'ship', owner,
@@ -41,16 +60,19 @@
     };
   }
 
-  function Game() { this.reset(); }
+  function Game(opts) { this.reset(opts); }
 
-  Game.prototype.reset = function () {
+  // opts.starts = [posA, posB] forces positions (tests); opts.rng = ()->[0,1)
+  // seeds the random placement. Default: randomized starts >= startDistance apart.
+  Game.prototype.reset = function (opts) {
+    opts = opts || {};
     _pid = 1;
-    const d = CONFIG.startDistance / 2;
     this.cfg = CONFIG;
     this.turn = 0;
+    const starts = opts.starts || randomStarts(opts.rng);
     this.ships = [
-      makeShip(0, V.of(-d, 0, 0)),
-      makeShip(1, V.of(+d, 0, 0)),
+      makeShip(0, starts[0]),
+      makeShip(1, starts[1]),
     ];
     this.projectiles = [];
     this.plans = [null, null];
@@ -110,7 +132,12 @@
   Game.prototype.observeEnemy = function (viewer) {
     const me = this.ships[viewer];
     const enemy = this.ships[1 - viewer];
-    return Phys.observe(enemy.history, me.pos, this.turn, CONFIG.c);
+    const ob = Phys.observe(enemy.history, me.pos, this.turn, CONFIG.c);
+    // Before any light has arrived, reveal NOTHING about the enemy — not its start
+    // position, not the range/ETA. The raw solver returns oldest/arrivesAt for
+    // omniscient callers; the sanctioned per-player channel strips them.
+    if (!ob.visible) return { visible: false, inbound: true };
+    return ob;
   };
 
   /* Own projectiles return TRUE positions (telemetry link); enemy projectiles
@@ -140,17 +167,12 @@
     return Phys.interceptEstimate(me.pos, image, w.speed);
   };
 
-  /* Pre-battle intel: the enemy's KNOWN starting position (a public constant) —
-   * the only ground-truth about the enemy a player is ever allowed. */
-  Game.prototype.enemyIntel = function (viewer) {
-    return V.clone(this.ships[1 - viewer].history[0].pos);
-  };
-
   /* The SANCTIONED per-player view. This is the only thing player-facing code
    * (planning UI + plan-scene renderer) may consult for the enemy. It contains
-   * ONLY light-delayed images + public start intel — never the enemy's true
-   * current position or velocity. (God mode is the one explicit exception and
-   * reads game.ships directly.) */
+   * ONLY light-delayed images — never the enemy's true position/velocity and,
+   * since starts are randomized and secret, no start intel either: until the
+   * enemy's light arrives you have NO idea where they are. (God mode is the one
+   * explicit exception and reads game.ships directly.) */
   Game.prototype.viewFor = function (viewer) {
     return {
       player: viewer,
@@ -158,8 +180,7 @@
       arenaRadius: this.arenaRadius(),
       overtime: this.inOvertime(),
       me: this.ships[viewer],                          // your own ship — your true state is yours to know
-      enemy: this.observeEnemy(viewer),                // light-delayed image ONLY
-      enemyIntel: this.enemyIntel(viewer),             // public start position
+      enemy: this.observeEnemy(viewer),                // light-delayed image ONLY (blind => no position)
       projectiles: this.observeProjectiles(viewer),    // own true; enemy delayed
     };
   };

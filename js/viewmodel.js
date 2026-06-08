@@ -100,11 +100,10 @@
       prim.push({ type: 'bubble', pos: ob.pos, worldRadius: unc, color: enCol, alpha: 0.35, dash: [3, 6] });
       prim.push({ type: 'label', pos: V.add(ob.pos, V.of(0, unc, 0)), text: `could be anywhere within ${unc.toFixed(0)}u`, color: enCol, dy: -2, alpha: 0.5 });
     } else {
-      // no live signal yet — show pre-battle intel (start position), fading
-      const intel = view.enemyIntel;
-      prim.push({ type: 'point', pos: intel, color: enCol, r: 4, fill: false, ring: true, dash: [2, 2], alpha: 0.4 });
-      const eta = ob.arrivesAt != null ? Math.ceil(ob.arrivesAt) : '?';
-      prim.push({ type: 'label', pos: intel, text: `NO SIGNAL · last intel T0 · first light ≈ turn ${eta}`, color: enCol, dy: -10, alpha: 0.6 });
+      // no live signal yet — and starts are randomized & secret, so we have NO
+      // idea where the enemy is. Show only a status note anchored on our own ship;
+      // never a position, ring, or ETA that would hint at their location/range.
+      prim.push({ type: 'label', pos: me.pos, text: 'NO SIGNAL · scanning for first light', color: enCol, dy: 30, alpha: 0.6 });
     }
 
     // --- projectiles: own true (telemetry), enemy delayed images ---
@@ -125,10 +124,10 @@
       }
     }
 
-    // Camera centers ONLY on what the viewer legitimately knows (own ship + the
-    // enemy's delayed image / start intel) — never the enemy's true position.
-    const known = ob.visible ? ob.pos : view.enemyIntel;
-    const target = V.scale(V.add(me.pos, known), 0.5);
+    // Camera centers ONLY on what the viewer legitimately knows: own ship, plus
+    // the enemy's delayed image once it exists. While blind it frames own ship
+    // alone — there is no enemy position (not even a guess) to point at.
+    const target = ob.visible ? V.scale(V.add(me.pos, ob.pos), 0.5) : V.clone(me.pos);
     return { primitives: prim, target };
   }
 
