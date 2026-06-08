@@ -87,9 +87,13 @@ buttons to read 3D depth cleanly. A small **orientation sphere** in the top-righ
 corner (under those buttons) shows which way X/Y/Z currently point. Every object
 also drops a shadow line to the floor plane to anchor it in space.
 
-**Fast-forward (debug):** the console's Debug panel advances *N* turns with both
-ships idle, at one turn per second — handy for watching the enemy's first light
-arrive at turn 10, or stepping the simulation while inspecting behaviour.
+**God mode (debug):** from the start-of-turn curtain, *Enter God Mode* shows an
+omniscient view — every object from both players at its true position (it's the
+one place light-delay is bypassed, on purpose). Its **fast-forward** advances
+*N* turns with both ships idle at one turn per second, and **animates each turn's
+resolution** — ships glide, projectiles fly their paths, and hits burst — so you
+can watch the simulation play out. Handy for seeing the enemy's first light
+arrive at turn 10 or stepping through behaviour.
 
 **Winning:** destroy the enemy ship (100 HP). If nobody dies by turn 40, the arena
 begins to **shrink** — forcing the ships together until the light-lag is small

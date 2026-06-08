@@ -97,18 +97,19 @@ const { Runner, loadPage } = require('./harness');
   let drawErr = null; try { LL.renderer.draw(); } catch (e) { drawErr = e; }
   t.ok('renderer.draw (with gizmo) runs in god mode', !drawErr, drawErr && drawErr.stack);
 
-  // ---------- FAST-FORWARD inside god mode (fake timers, both idle, stays truth) ----------
+  // ---------- FAST-FORWARD inside god mode: each turn's resolution is ANIMATED (rAF) ----------
   const a0 = V.clone(game.ships[0].pos), b0 = V.clone(game.ships[1].pos), startTurn = game.turn;
-  const fake = useFakeTimers();
   const ffNum = doc.querySelector('#console input[type=number]');
   const ffBtn = Array.from(doc.querySelectorAll('#console button')).find((b) => /FAST-FORWARD/.test(b.textContent));
   ffNum.value = '5';
   let ffErr = null;
   try {
-    ffBtn.click(); // first idle turn + schedules the rest
+    ffBtn.click(); // resolves the 1st turn and starts its animation
     t.ok('fast-forward shows a STOP control', Array.from(doc.querySelectorAll('#console button')).some((b) => /STOP/.test(b.textContent)));
-    t.ok('fast-forward still shows both ships (god view)', shipCount() === 2);
-    for (let i = 0; i < 8 && fake.pending(); i++) fake.fire(1);
+    t.ok('first turn resolved immediately', game.turn === startTurn + 1);
+    flushRaf(2); // partway through the 1st tick's animation
+    t.ok('mid-animation still shows both ships (god view, truth)', shipCount() === 2);
+    flushRaf(120); // drive the rAF animation chain through all 5 turns
   } catch (e) { ffErr = e; }
   t.ok('fast-forward runs without error', !ffErr, ffErr && ffErr.stack);
   t.ok('fast-forward advanced exactly 5 turns', game.turn === startTurn + 5, `turn ${startTurn} -> ${game.turn}`);

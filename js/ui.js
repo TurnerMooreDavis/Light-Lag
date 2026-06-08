@@ -473,39 +473,45 @@
   UI._ffStep = function () {
     if (!this._ffActive) return;
     if (this._ffRemaining <= 0 || this.game.phase === 'gameover') { this._ffEnd(); return; }
-    this.game.idleTurn();
+    this.game.idleTurn();                 // resolve one turn (records lastReport)
     this._ffRemaining--;
-    this._renderFF();
-    if (this._ffRemaining > 0 && this.game.phase !== 'gameover') {
-      this._ffTimer = setTimeout(() => this._ffStep(), 1000); // 1 turn / second
-    } else {
-      this._ffEnd();
-    }
+    this.refs.turn.textContent = 'TURN ' + this.game.turn;
+    this.refs.phase.textContent = 'FAST-FWD · ' + this._ffRemaining + ' left';
+    this.refs.phase.className = 'phase resolve';
+    this._animateTick(() => this._ffStep()); // animate the tick, then continue (or end)
   };
 
-  UI._stopFF = function () {
-    this._ffActive = false;
-    if (this._ffTimer) { clearTimeout(this._ffTimer); this._ffTimer = null; }
+  // animate the just-resolved tick over ~1s (the god view is omniscient, so the
+  // true positions are fair to show here); the rAF duration paces ~1 turn/second.
+  UI._animateTick = function (done) {
+    const g = this.game;
+    const token = ++this._animGen;
+    const dur = 900;
+    let start = null;
+    const step = (ts) => {
+      if (token !== this._animGen || !this._ffActive) return; // superseded / stopped
+      if (start == null) start = ts;
+      const alpha = Math.min(1, (ts - start) / dur);
+      const s = View.buildGodTick(g, alpha);
+      this.renderer.setScene(s.primitives, s.target);
+      this._godLegend();
+      if (this._ffStatus) this._ffStatus.textContent = `resolving turn ${g.turn} … ${this._ffRemaining} more`;
+      if (alpha < 1) requestAnimationFrame(step);
+      else done();
+    };
+    requestAnimationFrame(step);
   };
+
+  UI._stopFF = function () { this._ffActive = false; };
 
   UI._ffEnd = function () {
     const over = this.game.phase === 'gameover';
     this._stopFF();
     if (over) { this._godMode = false; this.gameOver(); return; }
-    // fast-forward only runs inside god mode — return to the god-mode panel
+    // fast-forward only runs inside god mode — return to the static god-mode panel
     this._showGodPanel();
     this._renderGod();
     this.refs.phase.textContent = 'GOD MODE (debug)';
-  };
-
-  UI._renderFF = function () {
-    this.refs.turn.textContent = 'TURN ' + this.game.turn;
-    this.refs.phase.textContent = 'FAST-FWD · ' + this._ffRemaining + ' left';
-    this.refs.phase.className = 'phase resolve';
-    if (this._ffStatus) this._ffStatus.textContent = `advancing… turn ${this.game.turn}, ${this._ffRemaining} remaining`;
-    const s = View.buildGodScene(this.game); // FF runs in god mode -> always the truth view
-    this.renderer.setScene(s.primitives, s.target);
-    this._godLegend();
   };
 
   UI._showFFPanel = function () {

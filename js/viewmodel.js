@@ -208,5 +208,40 @@
     return { primitives: prim, target: midTarget(game) };
   }
 
-  window.LL.View = { backdrop, buildPlanScene, buildReplayScene, buildGodScene, midTarget, stars };
+  /* DEBUG — the just-resolved tick animated truthfully at fraction alpha in [0,1]:
+   * ships glide history[T]->history[T+1], projectiles fly their segments, hits
+   * burst near the end. Uses game.lastReport (the omniscient record of the tick). */
+  function buildGodTick(game, alpha) {
+    const rep = game.lastReport;
+    if (!rep) return buildGodScene(game);
+    const a = Math.max(0, Math.min(1, alpha));
+    const T = rep.from, tNow = T + a;
+    const prim = backdrop(game.arenaRadiusAt(rep.to), game.inOvertime());
+    game.ships.forEach((s, i) => {
+      const p = histAt(s.history, tNow);
+      const tickVel = V.sub(histAt(s.history, T + 1), histAt(s.history, T)); // this tick's motion
+      prim.push({ type: 'ship', pos: p, color: COL[i], size: 10, dropLine: true, ghost: !s.alive });
+      if (V.len(tickVel) > 1e-3) prim.push({ type: 'arrow', a: p, b: V.add(p, tickVel), color: COL[i], width: 1.2 });
+      prim.push({ type: 'label', pos: p, text: `P${i + 1} · HP ${s.hp.toFixed(0)}`, color: COL[i], dy: -16, bg: '#04070d' });
+    });
+    for (const sg of rep.segments) {
+      const p = V.lerp(sg.p0, sg.p1, a);
+      const col = COL[sg.owner];
+      prim.push({ type: 'point', pos: p, color: col, r: 3 });
+      prim.push({ type: 'line', a: sg.p0, b: p, color: col, width: 0.6, dash: [1, 4] });
+      prim.push({ type: 'label', pos: p, text: `P${sg.owner + 1} ${sg.type}`, color: col, dy: -7, alpha: 0.8 });
+    }
+    if (a > 0.5) {
+      for (const h of rep.hits) {
+        const tt = (a - 0.5) / 0.5;
+        const fullyBlocked = h.damage === 0 && h.blocked > 0;
+        prim.push({ type: 'burst', pos: h.point, worldRadius: fullyBlocked ? 6 : 10, color: fullyBlocked ? '#5cff9d' : '#ff4d6d', t: tt });
+      }
+    }
+    const mid = V.scale(V.add(histAt(game.ships[0].history, tNow), histAt(game.ships[1].history, tNow)), 0.5);
+    prim.push({ type: 'label', pos: mid, text: `GOD VIEW · resolving turn ${rep.to}`, color: '#ffd34e', dy: 0, alpha: 0.6 });
+    return { primitives: prim, target: mid };
+  }
+
+  window.LL.View = { backdrop, buildPlanScene, buildReplayScene, buildGodScene, buildGodTick, midTarget, stars };
 })();
