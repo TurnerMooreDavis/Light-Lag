@@ -23,6 +23,21 @@ const { Runner, loadPage } = require('./harness');
   t.ok('choosing 2 players opens the pass-device curtain', doc.getElementById('curtain').classList.contains('show'));
   // pin deterministic symmetric starts for the scripted duel (starts are otherwise randomized)
   game.reset({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] });
+
+  // ---------- TOWARD/AWAY are disabled while blind (no enemy to steer toward) ----------
+  const btnByText = (txt) => Array.from(doc.querySelectorAll('#console button')).find((b) => b.textContent === txt);
+  UI.beginPlanning(0); // build P1's console at turn 0 (no signal yet)
+  t.ok('TOWARD/AWAY disabled while blind (no signal)', !!btnByText('TOWARD') && btnByText('TOWARD').disabled === true && btnByText('AWAY').disabled === true);
+  t.ok('COAST/BRAKE stay enabled while blind', btnByText('COAST').disabled === false && btnByText('BRAKE').disabled === false);
+  // put the enemy close and let a turn elapse so its light has arrived, then rebuild
+  game.turn = 1;
+  game.ships[1].pos = V.of(-45, 0, 0);
+  game.ships[1].history = [{ t: 0, pos: V.of(-45, 0, 0) }, { t: 1, pos: V.of(-45, 0, 0) }];
+  UI.beginPlanning(0);
+  t.ok('precondition: enemy now visible (within c)', game.observeEnemy(0).visible);
+  t.ok('TOWARD/AWAY re-enabled once the enemy is visible', btnByText('TOWARD').disabled === false && btnByText('AWAY').disabled === false);
+  game.reset({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] }); // restore a clean blind start for the duel
+
   const towardDir = (p) => {
     const ob = game.observeEnemy(p), me = game.ship(p);
     // blind => steer toward the arena centre (no enemy position is known)

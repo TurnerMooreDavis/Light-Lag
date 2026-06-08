@@ -102,7 +102,10 @@ Both players plan **simultaneously and in secret**, then the turn resolves toget
      speed. **Coasting at constant velocity is free**; only thrust costs energy —
      so a straight-line coaster is cheap but perfectly predictable (easy to lead),
      while dodging costs energy *and* takes turns (you can't stop or reverse on a
-     dime). `COAST` (no thrust) / `BRAKE` (kill momentum) / `TOWARD` / `AWAY` helpers.
+     dime). `COAST` (no thrust) / `BRAKE` (kill momentum) / `TOWARD` / `AWAY` helpers
+     — `TOWARD`/`AWAY` steer relative to the enemy's image, so they're **disabled
+     while you have no signal** (there's nothing to steer toward yet); set thrust
+     manually or `COAST`/`BRAKE` until first light.
    - **Weapons** — `LASER`, `TORPEDO`, or `HOLD FIRE`. Pick an aim point
      numerically (the depth axis is a number, not an ambiguous click), or hit
      **◎ FIRING SOLUTION** to auto-lead the target, then nudge with `−`/`+`.

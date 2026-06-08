@@ -221,11 +221,19 @@
       row.appendChild(sl); row.appendChild(num);
       moveSec.appendChild(row);
     });
+    // TOWARD/AWAY steer relative to the enemy's image — meaningless with NO SIGNAL
+    // (their location is unknown), so disable them until first light. COAST/BRAKE
+    // and the manual ax/ay/az inputs still work.
+    const toward = el('button', { onclick: () => this.setAccelToward(1) }, ['TOWARD']);
+    const away = el('button', { onclick: () => this.setAccelToward(-1) }, ['AWAY']);
+    if (!ob.visible) {
+      toward.disabled = away.disabled = true;
+      toward.title = away.title = 'No signal — enemy location unknown (steer manually)';
+    }
     moveSec.appendChild(el('div', { class: 'toolbar' }, [
       el('button', { onclick: () => { this.plan.accel = V.of(); this.buildConsole(); this.onPlanChanged(); } }, ['COAST']),
       el('button', { onclick: () => this.setBrake() }, ['BRAKE']),
-      el('button', { onclick: () => this.setAccelToward(1) }, ['TOWARD']),
-      el('button', { onclick: () => this.setAccelToward(-1) }, ['AWAY']),
+      toward, away,
     ]));
     r.moveReadout = el('div', { class: 'muted' }, ['']);
     moveSec.appendChild(r.moveReadout);
@@ -341,7 +349,8 @@
   };
   UI.setAccelToward = function (sign) {
     // thrust toward/away from the VISIBLE image — never the enemy's true current
-    // position. Blind, the enemy is unknown, so steer relative to the arena centre.
+    // position. (The buttons are disabled while blind; the centre fallback below
+    // is just a defensive default should this ever be called with no signal.)
     const v = this.game.viewFor(this.player);
     const tgt = v.enemy.visible ? v.enemy.pos : V.of();
     let dir = V.normalize(V.sub(tgt, v.me.pos));
