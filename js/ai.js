@@ -25,9 +25,16 @@
     const d = V.sub(to, from), l = V.len(d);
     return l > 1e-6 ? V.scale(d, 1 / l) : V.of(1, 0, 0);
   };
-  // an accel vector along `dir`, capped by max thrust AND the energy left for it
-  const thrust = (dir, energyLeft) =>
-    V.scale(dir, Math.min(CFG.maxAccel, Math.max(0, energyLeft) / CFG.accelCost));
+  // SEEK steering: thrust to push the current velocity toward the desired velocity
+  // (heading to `point` at top speed), capped by max thrust AND affordable energy.
+  // Correcting momentum (not just adding thrust toward the point) avoids the
+  // overshoot/orbit you get from blindly thrusting at a moving target.
+  const steerToward = (view, point, energyLeft) => {
+    const desired = V.scale(unitToward(view.me.pos, point), CFG.maxSpeed);
+    const steer = V.sub(desired, view.me.vel);
+    const cap = Math.min(CFG.maxAccel, Math.max(0, energyLeft) / CFG.accelCost);
+    return V.clampLen(steer, cap);
+  };
   // a lead solution computed from the delayed image (same tool a human's button uses)
   const firingSolution = (view, weaponKey) =>
     Phys.interceptEstimate(view.me.pos, view.enemy, CFG.weapons[weaponKey].speed);
@@ -35,8 +42,9 @@
 
   /* ---- HUNTER — super basic: close in, fire on sight, shield when shot at ---- */
   register('hunter', 'Hunter',
-    'Closes the distance, fires on sight, raises shields when shot at.',
+    'Charges in at full thrust, fires once in range, shields when shot at.',
     function (view) {
+      const FIRE_RANGE = 80; // hold fire (and pour energy into closing) until this near
       const plan = { accel: V.of(), weapon: 'none', aim: null, shield: 0, shieldDir: null };
       let energy = CFG.energyPerTurn;
 
@@ -48,8 +56,9 @@
         energy -= 4;
       }
 
-      // ATTACK: lead the visible image with a laser, or a torpedo if a laser won't fit
-      if (view.enemy.visible) {
+      // ATTACK only within striking range — firing caps this turn's thrust, so when
+      // far it spends the whole budget closing instead.
+      if (view.enemy.visible && V.dist(view.me.pos, view.enemy.pos) <= FIRE_RANGE) {
         const lsol = firingSolution(view, 'laser');
         if (lsol.ok && energy >= CFG.weapons.laser.cost) {
           plan.weapon = 'laser'; plan.aim = lsol.aim; energy -= CFG.weapons.laser.cost;
@@ -61,8 +70,9 @@
         }
       }
 
-      // MOVE: spend whatever energy is left closing on the target
-      plan.accel = thrust(unitToward(view.me.pos, targetPoint(view)), energy);
+      // MOVE: seek the target — steer velocity toward it (corrects momentum) with the
+      // remaining energy, so it bee-lines in rather than overshooting.
+      plan.accel = steerToward(view, targetPoint(view), energy);
       return plan;
     });
 

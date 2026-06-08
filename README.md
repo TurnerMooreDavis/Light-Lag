@@ -52,8 +52,10 @@ opponent is just another player: it issues the **same commands** from the **same
 light-delayed view** (`game.viewFor(player)`) — it never sees your true position,
 so it plays by the exact same rules. AI personalities live in `js/ai.js` behind a
 small registry (`LL.AI.register(key, name, desc, decide)`); each appears in the
-menu automatically. The first one, **Hunter**, is deliberately basic — close in,
-fire on sight, shield when shot at — and is the template for future types
+menu automatically. The first one, **Hunter**, is deliberately basic — charge in
+at full thrust (it holds fire until in range so closing isn't slowed, and *seek*-
+steers to correct momentum rather than overshoot), fire once in range, shield
+when shot at — and is the template for future types
 (timid/runner, sniper, etc.). A regression test runs Hunter against a player
 fleeing in 50 random straight-line directions and asserts it kills them every
 time (it wins because a straight-line runner gets pinned against the wall and

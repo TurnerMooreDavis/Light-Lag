@@ -330,8 +330,8 @@ const t = new Runner('unit');
   const mkView = (over) => Object.assign({
     player: 1, turn: 12, arenaRadius: CONFIG.arenaRadius0, overtime: false,
     me: { pos: V.of(0, 0, 0), vel: V.of() },
-    enemy: { visible: true, pos: V.of(100, 0, 0), vel: V.of(0, 0, 0), age: 5 },
-    enemyIntel: V.of(100, 0, 0),
+    enemy: { visible: true, pos: V.of(50, 0, 0), vel: V.of(0, 0, 0), age: 5 }, // within strike range
+    enemyIntel: V.of(50, 0, 0),
     projectiles: [],
   }, over || {});
 
@@ -356,6 +356,15 @@ const t = new Runner('unit');
   p = AI.decide('hunter', mkView({ enemy: { visible: false }, enemyIntel: V.of(100, 0, 0) }));
   t.ok('hunter holds fire when blind', p.weapon === 'none');
   t.ok('hunter still closes toward intel when blind', V.dot(p.accel, V.of(1, 0, 0)) > 0);
+
+  // Hunter: SEEK steering cancels perpendicular momentum (turns in, doesn't just thrust at the point)
+  p = AI.decide('hunter', mkView({ me: { pos: V.of(0, 0, 0), vel: V.of(0, CONFIG.maxSpeed, 0) }, enemy: { visible: true, pos: V.of(40, 0, 0), vel: V.of(), age: 1 } }));
+  t.ok('hunter steers against perpendicular drift (seek)', p.accel.y < -1e-6);
+
+  // Hunter: beyond strike range -> holds fire and commits near-max thrust to closing
+  p = AI.decide('hunter', mkView({ enemy: { visible: true, pos: V.of(140, 0, 0), vel: V.of(), age: 8 } }));
+  t.ok('hunter holds fire when far (closes first)', p.weapon === 'none');
+  t.ok('hunter uses near-max thrust to close when far', V.len(p.accel) > CONFIG.maxAccel - 0.5);
 
   // FAIRNESS: the AI plans only from the delayed view — poisoning enemy true pos changes nothing
   const g = new Engine();
@@ -424,7 +433,7 @@ const t = new Runner('unit');
   }
   t.ok(`AI beats a straight-line runner in all ${RUNS} random directions`, aiWins === RUNS, worst ? JSON.stringify(worst) : '');
   t.ok(`AI actually DESTROYS the runner in all ${RUNS} runs`, kills === RUNS, 'kills=' + kills + '/' + RUNS);
-  t.ok('every run resolves within the hard turn cap', maxTurn <= CONFIG.hardTurnCap, 'maxTurn=' + maxTurn);
+  t.ok('Hunter closes and kills promptly (well before the turn cap)', maxTurn <= 60, 'maxTurn=' + maxTurn);
 })();
 
 /* ===================== game log: complete, serializable record of a run ===================== */
