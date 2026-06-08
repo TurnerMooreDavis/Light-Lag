@@ -45,6 +45,17 @@ prediction and reality is the entire game.
 
 ---
 
+## Modes
+
+The start menu offers **2 Players (hotseat)** or **Vs Computer**. A computer
+opponent is just another player: it issues the **same commands** from the **same
+light-delayed view** (`game.viewFor(player)`) — it never sees your true position,
+so it plays by the exact same rules. AI personalities live in `js/ai.js` behind a
+small registry (`LL.AI.register(key, name, desc, decide)`); each appears in the
+menu automatically. The first one, **Hunter**, is deliberately basic — close in,
+fire on sight, shield when shot at — and is the template for future types
+(timid/runner, sniper, etc.).
+
 ## How to play (hotseat)
 
 Both players plan **simultaneously and in secret**, then the turn resolves together.
@@ -112,7 +123,8 @@ runs straight from `file://`.
 | `js/engine.js` | game state, turn resolution, energy, shields, overtime, win conditions |
 | `js/viewmodel.js` | turns game state into drawable primitives (where light-lag becomes visible) |
 | `js/render.js` | generic 3D→2D canvas renderer (depth-sorted painter's algorithm) |
-| `js/ui.js` | tactical console, planning input, hotseat phase machine |
+| `js/ai.js` | computer opponents — strategy registry; each plans from the sanctioned view |
+| `js/ui.js` | tactical console, planning input, mode menu, hotseat/vs-AI phase machine |
 | `js/main.js` | bootstrap |
 
 ## Tests

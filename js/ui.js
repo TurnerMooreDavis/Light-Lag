@@ -24,6 +24,9 @@
   const UI = {
     game: null, renderer: null, player: 0, plan: null,
     refs: {}, _animGen: 0, _godMode: false,
+    mode: 'hotseat',   // 'hotseat' (2 players) | 'ai' (vs computer)
+    aiType: 'hunter',  // which AI personality when mode === 'ai'
+    aiPlayer: 1,       // the computer is always player 2
   };
 
   UI.init = function (game, renderer) {
@@ -38,14 +41,41 @@
     this.refs.legend = document.getElementById('legend');
     this.refs.hint = document.getElementById('hint');
     this.refs.curtainGodBtn = document.getElementById('curtainGodBtn');
+    this.refs.menu = document.getElementById('menu');
+    this.refs.menuButtons = document.getElementById('menuButtons');
+    this.refs.menuHint = document.getElementById('menuHint');
     renderer.start();
-    this.newGame();
+    this.showMenu();
   };
 
-  UI.newGame = function () {
+  /* ---------- start menu (mode select) ---------- */
+  UI.showMenu = function () {
+    this._animGen++; this._stopFF(); this._godMode = false;
+    document.body.className = '';
+    this.refs.curtain.classList.remove('show');
+    this.refs.turn.textContent = 'LIGHT LAG';
+    this.refs.phase.textContent = 'MENU'; this.refs.phase.className = 'phase';
+    this.refs.console.innerHTML = '';
+    this.renderer.setScene(View.backdrop(CFG.arenaRadius0, false), V.of()); // ambient backdrop
+    const mb = this.refs.menuButtons; mb.innerHTML = '';
+    mb.appendChild(el('button', { class: 'primary', onclick: () => this.startGame('hotseat') }, ['2 PLAYERS (hotseat)']));
+    window.LL.AI.list().forEach((ai) => {
+      mb.appendChild(el('button', { title: ai.description, onclick: () => this.startGame('ai', ai.key) }, ['VS ' + ai.name.toUpperCase() + ' (AI)']));
+    });
+    this.refs.menuHint.textContent = window.LL.AI.list().map((a) => a.name + ' — ' + a.description).join('   ·   ');
+    this.refs.menu.classList.add('show');
+  };
+
+  UI.startGame = function (mode, aiType) {
+    this.mode = mode;
+    if (aiType) this.aiType = aiType;
+    this.refs.menu.classList.remove('show');
     this.game.reset();
     this.beginTurn();
   };
+
+  // "NEW BATTLE" returns to the menu so the mode can be re-chosen
+  UI.newGame = function () { this.showMenu(); };
 
   UI.beginTurn = function () {
     const p = 0;
@@ -60,9 +90,12 @@
     this._stopFF();       // and any running fast-forward
     this._godMode = false;
     const c = this.refs;
-    c.curtainWho.textContent = 'PLAYER ' + (player + 1);
+    const vsAI = this.mode === 'ai';
+    c.curtainWho.textContent = vsAI ? 'YOUR MOVE' : 'PLAYER ' + (player + 1);
     c.curtainWho.className = 'who ' + (player === 0 ? 'p1' : 'p2');
-    c.curtainMsg.textContent = `Turn ${this.game.turn + 1}. Make sure Player ${player + 1} is at the controls and the other player cannot see the screen. Your orders are planned in secret.`;
+    c.curtainMsg.textContent = vsAI
+      ? `Turn ${this.game.turn + 1}. Plan your orders against the ${window.LL.AI.get(this.aiType).name}.`
+      : `Turn ${this.game.turn + 1}. Make sure Player ${player + 1} is at the controls and the other player cannot see the screen. Your orders are planned in secret.`;
     c.curtain.classList.add('show');
     const btn = c.curtainBtn, god = c.curtainGodBtn;
     btn.className = 'primary';
@@ -380,7 +413,11 @@
   UI.commit = function () {
     if (!this.game.planValid(this.plan)) return;
     this.game.submitPlan(this.player, { accel: V.clone(this.plan.accel), weapon: this.plan.weapon, aim: this.plan.aim ? V.clone(this.plan.aim) : null, shield: this.plan.shield, shieldDir: this.plan.shieldDir ? V.clone(this.plan.shieldDir) : null });
-    if (this.player === 0) {
+    if (this.player === 0 && this.mode === 'ai') {
+      // the computer plans from its own sanctioned (light-delayed) view, then resolve
+      this.game.submitPlan(this.aiPlayer, window.LL.AI.decide(this.aiType, this.game.viewFor(this.aiPlayer)));
+      this.runResolve();
+    } else if (this.player === 0) {
       this.passTo(1, () => this.beginPlanning(1));
     } else {
       this.runResolve();

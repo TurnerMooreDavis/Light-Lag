@@ -26,7 +26,7 @@ Runner.prototype.report = function () {
 /* ---- DOM-free loader for the pure modules (vec3, camera, physics, engine, viewmodel) ---- */
 function loadCore() {
   const win = {};
-  for (const f of ['vec3', 'camera', 'physics', 'engine', 'viewmodel']) {
+  for (const f of ['vec3', 'camera', 'physics', 'engine', 'ai', 'viewmodel']) {
     // run each file's IIFE with `window` bound to our shared object; no node global pollution
     /* eslint-disable no-new-func */
     new Function('window', readJS(f))(win);
@@ -40,7 +40,7 @@ function loadPage() {
   try { JSDOM = require('jsdom').JSDOM; }
   catch (e) { throw new Error('jsdom is required for e2e tests — run `npm install` first.'); }
 
-  const order = ['vec3', 'camera', 'physics', 'engine', 'viewmodel', 'render', 'ui', 'main'];
+  const order = ['vec3', 'camera', 'physics', 'engine', 'ai', 'viewmodel', 'render', 'ui', 'main'];
   const inlined = order.map((f) => `<script>${readJS(f)}</script>`).join('\n');
   let html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   html = html.replace(/<script src="js\/[^"]+"><\/script>\s*/g, '');

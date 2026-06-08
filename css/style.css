@@ -122,6 +122,20 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 #curtainGodBtn { color: var(--ink-dim); border-color: var(--line); font-size: 12px; padding: 8px 18px; opacity: .8; }
 #curtainGodBtn:hover { opacity: 1; color: var(--warn); border-color: #6a5a1e; }
 
+/* ---- start menu (mode select) ---- */
+#menu {
+  position: absolute; inset: 0; z-index: 60; display: none;
+  align-items: center; justify-content: center; flex-direction: column; gap: 14px;
+  background: rgba(2,5,10,.97); text-align: center;
+}
+#menu.show { display: flex; }
+#menu h1 { letter-spacing: 5px; margin: 0; font-size: 40px; }
+#menu h1 b { color: var(--p1); } #menu h1 i { color: var(--p2); font-style: normal; }
+#menu p { color: var(--ink-dim); max-width: 460px; line-height: 1.6; }
+#menuButtons { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; min-width: 280px; }
+#menuButtons button { padding: 13px 28px; font-size: 14px; letter-spacing: 1px; }
+#menuHint { font-size: 11px; opacity: .65; max-width: 420px; }
+
 /* ---- log ---- */
 #log { font-size: 11px; line-height: 1.5; max-height: 150px; overflow-y: auto;
   color: var(--ink-dim); }

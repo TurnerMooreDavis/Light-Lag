@@ -13,10 +13,14 @@ const { Runner, loadPage } = require('./harness');
   t.ok('LL namespace booted', !!(LL && LL.game && LL.UI && LL.renderer && LL.View));
   if (!LL || !LL.game) { t.report(); process.exit(1); }
   const { UI, game, V, CONFIG } = LL;
-  t.ok('opens at the pass-device curtain', doc.getElementById('curtain').classList.contains('show'));
+  t.ok('opens at the start menu', doc.getElementById('menu').classList.contains('show'));
   t.ok('gizmo renderer hook exists', typeof LL.renderer._drawGizmo === 'function');
+  t.ok('menu lists a computer opponent', Array.from(doc.querySelectorAll('#menuButtons button')).some((b) => /VS .* \(AI\)/.test(b.textContent)));
 
   const clickCurtain = () => doc.getElementById('curtainBtn').click();
+  const startMode = (re) => { Array.from(doc.querySelectorAll('#menuButtons button')).find((b) => re.test(b.textContent)).click(); };
+  startMode(/2 PLAYERS/);
+  t.ok('choosing 2 players opens the pass-device curtain', doc.getElementById('curtain').classList.contains('show'));
   const towardDir = (p) => {
     const ob = game.observeEnemy(p), me = game.ship(p);
     const tgt = ob.visible ? V.add(ob.pos, V.scale(ob.vel, ob.age || 0)) : game.ships[1 - p].history[0].pos;
@@ -72,7 +76,9 @@ const { Runner, loadPage } = require('./harness');
   // ---------- new battle resets ----------
   Array.from(doc.getElementById('console').querySelectorAll('button')).find((b) => /NEW BATTLE/.test(b.textContent)).click();
   flushRaf(1);
-  t.ok('new battle resets to turn 0 at the curtain', game.turn === 0 && game.phase === 'plan');
+  t.ok('new battle returns to the start menu', doc.getElementById('menu').classList.contains('show'));
+  startMode(/2 PLAYERS/); // fresh hotseat game for the god-mode / gizmo checks below
+  t.ok('fresh game resets to turn 0 at the curtain', game.turn === 0 && game.phase === 'plan');
 
   // ---------- GOD MODE entry (only from the start-of-turn curtain) ----------
   const shipCount = () => LL.renderer.scene.filter((p) => p.type === 'ship').length;
@@ -124,6 +130,24 @@ const { Runner, loadPage } = require('./harness');
   // ---------- god-mode button is hidden at the player-2 hand-off (a plan is pending) ----------
   planAndCommit(0, { weapon: 'none' }); // commit player 1 -> passTo(1)
   t.ok('god-mode button hidden at the player-2 curtain', doc.getElementById('curtainGodBtn').style.display === 'none');
+
+  // ---------- VS COMPUTER: the AI is a player that auto-plans from its own delayed view ----------
+  UI.showMenu();
+  startMode(/VS HUNTER/);
+  t.ok('vs-computer mode engaged', UI.mode === 'ai');
+  t.ok('vs-ai opens straight to the human turn (no player-2 hand-off)', doc.getElementById('curtain').classList.contains('show'));
+  let aiErr = null, humanTurns = 0;
+  try {
+    for (let i = 0; i < 40 && game.phase !== 'gameover'; i++) {
+      clickCurtain();                                  // human readies — there is no second curtain
+      planAndCommit(0, { weapon: 'laser', toward: true }); // commit triggers AI plan + resolve
+      humanTurns++;
+    }
+  } catch (e) { aiErr = e; }
+  t.ok('vs-ai duel runs without exceptions', !aiErr, aiErr && aiErr.stack);
+  t.ok('one human commit resolves exactly one turn (AI auto-plays)', game.turn === humanTurns);
+  t.ok('vs-ai reached a conclusion', game.phase === 'gameover');
+  t.ok('the AI engaged — damage was dealt', game.ships[0].hp < CONFIG.startHP || game.ships[1].hp < CONFIG.startHP);
 
   t.ok('no uncaught window errors during e2e', errors.length === 0, errors.join(' | '));
   process.exit(t.report() ? 0 : 1);

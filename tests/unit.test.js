@@ -323,6 +323,48 @@ const t = new Runner('unit');
   t.ok('god view reveals the enemy even before its light arrives', View.buildGodScene(g2).primitives.filter((p) => p.type === 'ship').length === 2);
 })();
 
+/* ===================== AI: registry + Hunter behavior + view-only fairness ===================== */
+(() => {
+  const AI = LL.AI;
+  // a hand-built sanctioned view (the only thing an AI ever receives)
+  const mkView = (over) => Object.assign({
+    player: 1, turn: 12, arenaRadius: CONFIG.arenaRadius0, overtime: false,
+    me: { pos: V.of(0, 0, 0), vel: V.of() },
+    enemy: { visible: true, pos: V.of(100, 0, 0), vel: V.of(0, 0, 0), age: 5 },
+    enemyIntel: V.of(100, 0, 0),
+    projectiles: [],
+  }, over || {});
+
+  t.ok('registry lists the Hunter', AI.list().some((a) => a.key === 'hunter'));
+  t.ok('every AI entry has name + description', AI.list().every((a) => a.name && a.description));
+  t.ok('unknown key falls back to a real strategy', typeof AI.get('nope').decide === 'function');
+
+  // Hunter: closes + fires on a visible enemy, no shield when nothing incoming
+  let p = AI.decide('hunter', mkView());
+  t.ok('hunter thrusts toward the enemy', V.dot(p.accel, V.of(1, 0, 0)) > 0);
+  t.ok('hunter fires on a visible enemy', p.weapon !== 'none' && !!p.aim);
+  t.ok('hunter does not shield with nothing incoming', p.shield === 0);
+  // the AI issues the SAME commands as a human and stays within budget
+  t.ok('hunter plan is valid & affordable', new Engine().planValid(p));
+
+  // Hunter: shields toward a visibly incoming shot
+  p = AI.decide('hunter', mkView({ projectiles: [{ own: false, type: 'torpedo', pos: V.of(20, 0, 0), vel: V.of(-6, 0, 0), age: 2 }] }));
+  t.ok('hunter raises shields vs an incoming shot', p.shield > 0 && !!p.shieldDir);
+  t.ok('hunter still affordable while shielding+firing', new Engine().planValid(p));
+
+  // Hunter: blind (no light yet) -> holds fire, still closes on intel
+  p = AI.decide('hunter', mkView({ enemy: { visible: false }, enemyIntel: V.of(100, 0, 0) }));
+  t.ok('hunter holds fire when blind', p.weapon === 'none');
+  t.ok('hunter still closes toward intel when blind', V.dot(p.accel, V.of(1, 0, 0)) > 0);
+
+  // FAIRNESS: the AI plans only from the delayed view — poisoning enemy true pos changes nothing
+  const g = new Engine();
+  for (let i = 0; i < 14; i++) { g.submitPlan(0, { accel: V.of(0, 2, 0), weapon: 'none' }); g.submitPlan(1, { accel: V.of(), weapon: 'none' }); g.resolve(); }
+  const before = JSON.stringify(AI.decide('hunter', g.viewFor(1)));
+  g.ships[0].pos = V.of(123456, 0, 0); g.ships[0].vel = V.of(999, 0, 0);
+  t.ok('AI plan is unaffected by enemy true-pos tamper', JSON.stringify(AI.decide('hunter', g.viewFor(1))) === before);
+})();
+
 /* ===================== fairness: enemy TRUE position is never exposed to a player ===================== */
 (() => {
   const g = new Engine();
