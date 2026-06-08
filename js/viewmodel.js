@@ -36,9 +36,12 @@
   /* Planning view for `viewer`, reflecting an in-progress `plan`. */
   function buildPlanScene(game, viewer, plan, opts) {
     opts = opts || {};
-    const me = game.ships[viewer];
+    // ONLY the sanctioned per-player view — never game.ships[enemy]. The enemy is
+    // available solely as a light-delayed image (view.enemy) + start intel.
+    const view = game.viewFor(viewer);
+    const me = view.me;
     const myCol = COL[viewer], enCol = COL[1 - viewer];
-    const prim = backdrop(game.arenaRadius(), game.inOvertime());
+    const prim = backdrop(view.arenaRadius, view.overtime);
 
     // --- own ship (known exactly) ---
     prim.push({ type: 'ship', pos: me.pos, color: myCol, size: 10, dropLine: true });
@@ -85,7 +88,7 @@
     }
 
     // --- enemy: light-delayed image ---
-    const ob = game.observeEnemy(viewer);
+    const ob = view.enemy;
     if (ob.visible) {
       prim.push({ type: 'ship', pos: ob.pos, color: enCol, size: 9, ghost: true, dash: [2, 4], dropLine: true });
       prim.push({ type: 'label', pos: ob.pos, text: `ENEMY · light T−${ob.age.toFixed(1)}`, color: enCol, dy: -16, bg: '#04070d' });
@@ -98,35 +101,33 @@
       prim.push({ type: 'label', pos: V.add(ob.pos, V.of(0, unc, 0)), text: `could be anywhere within ${unc.toFixed(0)}u`, color: enCol, dy: -2, alpha: 0.5 });
     } else {
       // no live signal yet — show pre-battle intel (start position), fading
-      const intel = game.ships[1 - viewer].history[0].pos;
+      const intel = view.enemyIntel;
       prim.push({ type: 'point', pos: intel, color: enCol, r: 4, fill: false, ring: true, dash: [2, 2], alpha: 0.4 });
       const eta = ob.arrivesAt != null ? Math.ceil(ob.arrivesAt) : '?';
       prim.push({ type: 'label', pos: intel, text: `NO SIGNAL · last intel T0 · first light ≈ turn ${eta}`, color: enCol, dy: -10, alpha: 0.6 });
     }
 
-    // --- projectiles: own true, enemy delayed (with extrapolation) ---
-    for (const pv of game.observeProjectiles(viewer)) {
-      const pr = pv.proj;
+    // --- projectiles: own true (telemetry), enemy delayed images ---
+    for (const pv of view.projectiles) {
       if (pv.own) {
         prim.push({ type: 'point', pos: pv.pos, color: myCol, r: 3 });
         const ud = V.normalize(pv.vel);
         if (V.len2(ud) > 1e-9) prim.push({ type: 'arrow', a: pv.pos, b: V.add(pv.pos, V.scale(ud, 6)), color: myCol, width: 0.8 });
-        prim.push({ type: 'label', pos: pv.pos, text: pr.type[0].toUpperCase(), color: myCol, dy: -6, alpha: 0.7 });
+        prim.push({ type: 'label', pos: pv.pos, text: pv.type[0].toUpperCase(), color: myCol, dy: -6, alpha: 0.7 });
       } else {
         // delayed image of an incoming shot
         prim.push({ type: 'point', pos: pv.pos, color: enCol, r: 3, fill: false, ring: true, dash: [2, 2], alpha: 0.7 });
-        // torpedoes fly straight => extrapolate their TRUE current position
+        // a torpedo flies straight, so its OBSERVED image extrapolates exactly to "now"
         const predNow = V.add(pv.pos, V.scale(pv.vel, pv.age || 0));
         prim.push({ type: 'line', a: pv.pos, b: predNow, color: enCol, width: 0.8, dash: [2, 3] });
         prim.push({ type: 'point', pos: predNow, color: enCol, r: 4, ring: true, ringW: 2, fill: false });
-        prim.push({ type: 'label', pos: predNow, text: `INCOMING ${pr.type} (pred. now)`, color: enCol, dy: -8 });
+        prim.push({ type: 'label', pos: predNow, text: `INCOMING ${pv.type} (pred. now)`, color: enCol, dy: -8 });
       }
     }
 
-    // Camera centers ONLY on info the viewer legitimately has (own ship + the
-    // enemy's *apparent* image / pre-battle intel) — never the enemy's true pos,
-    // which would leak their hidden location through camera framing.
-    const known = ob.visible ? ob.pos : game.ships[1 - viewer].history[0].pos;
+    // Camera centers ONLY on what the viewer legitimately knows (own ship + the
+    // enemy's delayed image / start intel) — never the enemy's true position.
+    const known = ob.visible ? ob.pos : view.enemyIntel;
     const target = V.scale(V.add(me.pos, known), 0.5);
     return { primitives: prim, target };
   }

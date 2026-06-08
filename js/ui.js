@@ -267,9 +267,10 @@
     return sol.ok ? sol.aim : null;
   };
   UI.apparentAim = function () {
-    const ob = this.game.observeEnemy(this.player);
-    if (ob.visible) return V.add(ob.pos, V.scale(ob.vel, ob.age || 0)); // predicted-now of image
-    return V.clone(this.game.ships[1 - this.player].history[0].pos);
+    // aim at exactly what you SEE — the light-delayed image (or start intel).
+    // Leading the target is the explicit job of the FIRING SOLUTION button.
+    const v = this.game.viewFor(this.player);
+    return v.enemy.visible ? V.clone(v.enemy.pos) : V.clone(v.enemyIntel);
   };
   UI.selectWeapon = function (key) {
     this.plan.weapon = key;
@@ -277,10 +278,11 @@
     this.buildConsole();
   };
   UI.setAccelToward = function (sign) {
-    const ob = this.game.observeEnemy(this.player);
-    const me = this.game.ship(this.player);
-    const tgt = ob.visible ? V.add(ob.pos, V.scale(ob.vel, ob.age || 0)) : this.game.ships[1 - this.player].history[0].pos;
-    let dir = V.normalize(V.sub(tgt, me.pos));
+    // thrust toward/away from the VISIBLE image (or start intel) — never the
+    // enemy's true current position.
+    const v = this.game.viewFor(this.player);
+    const tgt = v.enemy.visible ? v.enemy.pos : v.enemyIntel;
+    let dir = V.normalize(V.sub(tgt, v.me.pos));
     if (V.len2(dir) < 1e-6) dir = V.of(1, 0, 0);
     this.plan.accel = V.scale(dir, sign * CFG.maxAccel);
     this.buildConsole();
@@ -292,14 +294,15 @@
     this.buildConsole();
   };
   UI.faceShield = function (mode) {
-    const ob = this.game.observeEnemy(this.player);
-    const me = this.game.ship(this.player);
+    const v = this.game.viewFor(this.player);
     if (mode === 'incoming') {
-      const incoming = this.game.observeProjectiles(this.player).find((pv) => !pv.own);
-      if (incoming) { const predNow = V.add(incoming.pos, V.scale(incoming.vel, incoming.age || 0)); this.plan.shieldDir = predNow; this.onPlanChanged(); return; }
+      // a seen torpedo flies straight, so extrapolating its OBSERVED image is exact
+      const incoming = v.projectiles.find((pv) => !pv.own);
+      if (incoming) { this.plan.shieldDir = V.add(incoming.pos, V.scale(incoming.vel, incoming.age || 0)); this.onPlanChanged(); return; }
     }
-    this.plan.shieldDir = ob.visible ? V.add(ob.pos, V.scale(ob.vel, ob.age || 0)) : V.clone(this.game.ships[1 - this.player].history[0].pos);
-    void me; this.onPlanChanged();
+    // otherwise face the enemy's visible image (or start intel) — never their true pos
+    this.plan.shieldDir = v.enemy.visible ? V.clone(v.enemy.pos) : V.clone(v.enemyIntel);
+    this.onPlanChanged();
   };
 
   /* ---------- derived display ---------- */

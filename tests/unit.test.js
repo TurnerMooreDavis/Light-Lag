@@ -323,4 +323,41 @@ const t = new Runner('unit');
   t.ok('god view reveals the enemy even before its light arrives', View.buildGodScene(g2).primitives.filter((p) => p.type === 'ship').length === 2);
 })();
 
+/* ===================== fairness: enemy TRUE position is never exposed to a player ===================== */
+(() => {
+  const g = new Engine();
+  // reach a state where the enemy is visible as a moving, delayed image
+  for (let i = 0; i < 14; i++) { g.submitPlan(0, { accel: V.of(), weapon: 'none' }); g.submitPlan(1, { accel: V.of(0, 2, 0), weapon: 'none' }); g.resolve(); }
+  t.ok('precondition: enemy visible as a delayed image', g.observeEnemy(0).visible);
+
+  const planArgs = [g, 0, { accel: V.of(), weapon: 'laser', aim: V.of(0, 0, 0) }, { showSolution: true }];
+  const sceneBefore = JSON.stringify(View.buildPlanScene(...planArgs).primitives);
+  const viewBefore = JSON.stringify(g.viewFor(0));
+
+  // POISON the enemy's true current position & velocity with absurd values
+  g.ships[1].pos = V.of(99999, -88888, 77777);
+  g.ships[1].vel = V.of(500, 500, 500);
+
+  t.ok('player plan-scene is unaffected by enemy true-pos tamper', JSON.stringify(View.buildPlanScene(...planArgs).primitives) === sceneBefore);
+  t.ok('viewFor is unaffected by enemy true-pos tamper', JSON.stringify(g.viewFor(0)) === viewBefore);
+
+  const v = g.viewFor(0);
+  t.ok('viewFor.enemy is exactly the delayed image (no true pos)', JSON.stringify(v.enemy) === JSON.stringify(g.observeEnemy(0)));
+  t.ok('viewFor.enemyIntel is the start position, not current', V.eq(v.enemyIntel, g.ships[1].history[0].pos));
+  t.ok('delayed image is NOT the poisoned true position', V.dist(v.enemy.pos, g.ships[1].pos) > 1000);
+  const towardTgt = v.enemy.visible ? v.enemy.pos : v.enemyIntel; // how setAccelToward/AT-IMAGE pick their target
+  t.ok('TOWARD/AT-IMAGE targets the visible image, not true pos', V.dist(towardTgt, g.ships[1].pos) > 1000);
+
+  // observeProjectiles must expose sanitized entries only (no live projectile reference)
+  const g3 = new Engine(); g3.turn = 5;
+  g3.ships[0].pos = V.of(0, 0, 0); g3.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }];
+  g3.projectiles = [{ id: 9, type: 'torpedo', owner: 1, alive: true, pos: V.of(8, 0, 0), vel: V.of(-1, 0, 0), history: [0, 1, 2, 3, 4, 5].map((tt) => ({ t: tt, pos: V.of(8, 0, 0) })) }];
+  const obs = g3.observeProjectiles(0);
+  t.ok('enemy projectile seen as a delayed image', obs.length === 1 && obs[0].own === false && obs[0].type === 'torpedo');
+  t.ok('observed projectile exposes no live reference', obs[0].proj === undefined);
+
+  // sanity: god view (debug) IS allowed to read true state — proves the tamper is real
+  t.ok('god view (debug) does reflect the true/poisoned state', View.buildGodScene(g).primitives.some((p) => p.type === 'ship' && p.pos.x > 9000));
+})();
+
 process.exit(t.report() ? 0 : 1);

@@ -114,17 +114,19 @@
   };
 
   /* Own projectiles return TRUE positions (telemetry link); enemy projectiles
-   * return light-delayed images (you must spot them coming). */
+   * return light-delayed images (you must spot them coming). Each entry carries
+   * only sanitized fields (type/pos/vel/age) — never a reference to the live
+   * projectile, so an enemy projectile's true position can't leak through. */
   Game.prototype.observeProjectiles = function (viewer) {
     const me = this.ships[viewer];
     const out = [];
     for (const pr of this.projectiles) {
       if (!pr.alive) continue;
       if (pr.owner === viewer) {
-        out.push({ proj: pr, own: true, visible: true, pos: V.clone(pr.pos), vel: V.clone(pr.vel) });
+        out.push({ own: true, visible: true, type: pr.type, pos: V.clone(pr.pos), vel: V.clone(pr.vel), age: 0 });
       } else {
         const ob = Phys.observe(pr.history, me.pos, this.turn, CONFIG.c);
-        if (ob.visible) out.push({ proj: pr, own: false, visible: true, pos: ob.pos, vel: ob.vel, age: ob.age });
+        if (ob.visible) out.push({ own: false, visible: true, type: pr.type, pos: ob.pos, vel: ob.vel, age: ob.age });
       }
     }
     return out;
@@ -136,6 +138,30 @@
     const me = this.ships[viewer];
     const image = this.observeEnemy(viewer);
     return Phys.interceptEstimate(me.pos, image, w.speed);
+  };
+
+  /* Pre-battle intel: the enemy's KNOWN starting position (a public constant) —
+   * the only ground-truth about the enemy a player is ever allowed. */
+  Game.prototype.enemyIntel = function (viewer) {
+    return V.clone(this.ships[1 - viewer].history[0].pos);
+  };
+
+  /* The SANCTIONED per-player view. This is the only thing player-facing code
+   * (planning UI + plan-scene renderer) may consult for the enemy. It contains
+   * ONLY light-delayed images + public start intel — never the enemy's true
+   * current position or velocity. (God mode is the one explicit exception and
+   * reads game.ships directly.) */
+  Game.prototype.viewFor = function (viewer) {
+    return {
+      player: viewer,
+      turn: this.turn,
+      arenaRadius: this.arenaRadius(),
+      overtime: this.inOvertime(),
+      me: this.ships[viewer],                          // your own ship — your true state is yours to know
+      enemy: this.observeEnemy(viewer),                // light-delayed image ONLY
+      enemyIntel: this.enemyIntel(viewer),             // public start position
+      projectiles: this.observeProjectiles(viewer),    // own true; enemy delayed
+    };
   };
 
   /* --- resolution: advance one tick, return a truth report for replay ----- */
