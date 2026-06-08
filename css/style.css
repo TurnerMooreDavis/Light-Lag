@@ -119,6 +119,8 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 #curtain .who.p2 { color: var(--p2); }
 #curtain p { color: var(--ink-dim); max-width: 460px; line-height: 1.6; }
 #curtain button { padding: 12px 28px; font-size: 14px; }
+#curtainGodBtn { color: var(--ink-dim); border-color: var(--line); font-size: 12px; padding: 8px 18px; opacity: .8; }
+#curtainGodBtn:hover { opacity: 1; color: var(--warn); border-color: #6a5a1e; }
 
 /* ---- log ---- */
 #log { font-size: 11px; line-height: 1.5; max-height: 150px; overflow-y: auto;

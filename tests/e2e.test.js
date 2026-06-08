@@ -69,50 +69,56 @@ const { Runner, loadPage } = require('./harness');
   flushRaf(1);
   t.ok('new battle resets to turn 0 at the curtain', game.turn === 0 && game.phase === 'plan');
 
-  // ---------- gizmo + no center axes ----------
-  clickCurtain(); // into a fresh planning view
-  let drawErr = null;
-  try { LL.renderer.draw(); } catch (e) { drawErr = e; }
-  t.ok('renderer.draw (with gizmo) runs without error', !drawErr, drawErr && drawErr.stack);
-  t.ok('plan scene contains no world-axis primitive', !LL.View.buildPlanScene(game, 0, { move: V.of(), weapon: 'none' }, {}).primitives.some((p) => p.type === 'axes'));
-
-  // ---------- GOD VIEW (debug: all objects, both players, truth) ----------
-  const godCheckbox = (root) => Array.from(doc.querySelectorAll((root || '#console') + ' label'))
-    .find((l) => /god view/i.test(l.textContent));
+  // ---------- GOD MODE entry (only from the start-of-turn curtain) ----------
   const shipCount = () => LL.renderer.scene.filter((p) => p.type === 'ship').length;
-  UI.refreshScene();
-  t.ok('plan view hides the enemy early (light-lag)', shipCount() === 1);
-  const gc = godCheckbox('#console');
-  t.ok('console has a god-view toggle', !!gc);
-  const gcb = gc.querySelector('input[type=checkbox]');
-  gcb.checked = true; gcb.dispatchEvent(new window.Event('change'));
-  t.ok('god view reveals BOTH ships at once (truth)', shipCount() === 2);
-  t.ok('UI.godView flag set', UI.godView === true);
-  gcb.checked = false; gcb.dispatchEvent(new window.Event('change'));
-  t.ok('toggling god view off restores the delayed view', shipCount() === 1 && UI.godView === false);
+  const consoleText = () => doc.getElementById('console').textContent;
+  const curtainGod = doc.getElementById('curtainGodBtn');
+  t.ok('curtain has a god-mode button', !!curtainGod);
+  t.ok('god-mode button shown at the start-of-turn (player-1) curtain', curtainGod.style.display !== 'none');
 
-  // ---------- FAST-FORWARD (1 turn/sec, both idle), driven by fake timers ----------
-  t.ok('on a planning screen before fast-forward', game.phase === 'plan');
-  const a0 = V.clone(game.ships[0].pos), b0 = V.clone(game.ships[1].pos);
-  const startTurn = game.turn;
+  curtainGod.click(); // enter god mode instead of starting player 1's turn
+  t.ok('god mode is active', UI._godMode === true);
+  t.ok('curtain dismissed on entering god mode', !doc.getElementById('curtain').classList.contains('show'));
+  t.ok('god mode reveals BOTH ships at true positions', shipCount() === 2);
+  t.ok('god-mode console has the fast-forward tool', /FAST-FORWARD/.test(consoleText()));
+  t.ok('god-mode console has an exit button', /EXIT GOD MODE/i.test(consoleText()));
+  t.ok('god-mode console has NO planning controls', !/(LOCK IN ORDERS|Weapons|Shields|Maneuver)/.test(consoleText()));
+  let drawErr = null; try { LL.renderer.draw(); } catch (e) { drawErr = e; }
+  t.ok('renderer.draw (with gizmo) runs in god mode', !drawErr, drawErr && drawErr.stack);
+
+  // ---------- FAST-FORWARD inside god mode (fake timers, both idle, stays truth) ----------
+  const a0 = V.clone(game.ships[0].pos), b0 = V.clone(game.ships[1].pos), startTurn = game.turn;
   const fake = useFakeTimers();
+  const ffNum = doc.querySelector('#console input[type=number]');
+  const ffBtn = Array.from(doc.querySelectorAll('#console button')).find((b) => /FAST-FORWARD/.test(b.textContent));
+  ffNum.value = '5';
   let ffErr = null;
   try {
-    UI.fastForward(5);                       // does the 1st idle turn immediately, schedules the rest
-    t.ok('fast-forward shows a STOP control', Array.from(doc.getElementById('console').querySelectorAll('button')).some((b) => /STOP/.test(b.textContent)));
-    // god view is usable WITH fast-forward (toggle it on from the FF panel)
-    const ffGod = godCheckbox('#console');
-    t.ok('fast-forward panel exposes the god-view toggle', !!ffGod);
-    const ffGcb = ffGod.querySelector('input[type=checkbox]');
-    ffGcb.checked = true; ffGcb.dispatchEvent(new window.Event('change'));
-    t.ok('god view during fast-forward shows both ships', LL.renderer.scene.filter((p) => p.type === 'ship').length === 2);
-    for (let i = 0; i < 8 && fake.pending(); i++) fake.fire(1); // advance the 1s ticks
-    UI.godView = false;
+    ffBtn.click(); // first idle turn + schedules the rest
+    t.ok('fast-forward shows a STOP control', Array.from(doc.querySelectorAll('#console button')).some((b) => /STOP/.test(b.textContent)));
+    t.ok('fast-forward still shows both ships (god view)', shipCount() === 2);
+    for (let i = 0; i < 8 && fake.pending(); i++) fake.fire(1);
   } catch (e) { ffErr = e; }
   t.ok('fast-forward runs without error', !ffErr, ffErr && ffErr.stack);
   t.ok('fast-forward advanced exactly 5 turns', game.turn === startTurn + 5, `turn ${startTurn} -> ${game.turn}`);
   t.ok('both ships stayed idle during fast-forward', V.eq(game.ships[0].pos, a0, 1e-9) && V.eq(game.ships[1].pos, b0, 1e-9));
-  t.ok('fast-forward ended back at a planning hand-off', game.phase === 'plan' && doc.getElementById('curtain').classList.contains('show'));
+  t.ok('still in god mode after fast-forward', UI._godMode === true);
+  t.ok('god-mode panel restored after fast-forward', /FAST-FORWARD/.test(consoleText()) && /EXIT GOD MODE/i.test(consoleText()));
+
+  // ---------- exit god mode -> back to the start-of-turn curtain ----------
+  Array.from(doc.querySelectorAll('#console button')).find((b) => /EXIT GOD MODE/i.test(b.textContent)).click();
+  t.ok('exiting god mode returns to the curtain', UI._godMode === false && doc.getElementById('curtain').classList.contains('show'));
+
+  // ---------- planning console no longer carries debug/FF; gizmo still draws ----------
+  clickCurtain(); // start player 1's turn
+  t.ok('planning console has no fast-forward/debug controls', !/FAST-FORWARD/.test(consoleText()));
+  t.ok('plan scene has no world-axis primitive', !LL.View.buildPlanScene(game, 0, { move: V.of(), weapon: 'none' }, {}).primitives.some((p) => p.type === 'axes'));
+  let drawErr2 = null; try { LL.renderer.draw(); } catch (e) { drawErr2 = e; }
+  t.ok('renderer.draw (with gizmo) runs in planning', !drawErr2, drawErr2 && drawErr2.stack);
+
+  // ---------- god-mode button is hidden at the player-2 hand-off (a plan is pending) ----------
+  planAndCommit(0, { weapon: 'none' }); // commit player 1 -> passTo(1)
+  t.ok('god-mode button hidden at the player-2 curtain', doc.getElementById('curtainGodBtn').style.display === 'none');
 
   t.ok('no uncaught window errors during e2e', errors.length === 0, errors.join(' | '));
   process.exit(t.report() ? 0 : 1);

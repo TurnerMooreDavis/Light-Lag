@@ -23,7 +23,7 @@
 
   const UI = {
     game: null, renderer: null, player: 0, plan: null,
-    refs: {}, _animGen: 0, godView: false,
+    refs: {}, _animGen: 0, _godMode: false,
   };
 
   UI.init = function (game, renderer) {
@@ -37,6 +37,7 @@
     this.refs.curtainBtn = document.getElementById('curtainBtn');
     this.refs.legend = document.getElementById('legend');
     this.refs.hint = document.getElementById('hint');
+    this.refs.curtainGodBtn = document.getElementById('curtainGodBtn');
     renderer.start();
     this.newGame();
   };
@@ -51,19 +52,64 @@
     this.passTo(p, () => this.beginPlanning(p));
   };
 
-  /* pass-device curtain */
+  /* pass-device curtain. God mode can be entered ONLY here, and ONLY at the
+   * start of a turn (the player-1 hand-off) — so there is never a half-made plan
+   * to abandon. */
   UI.passTo = function (player, onReady) {
     this._animGen++;      // kill any running replay animation before a planning hand-off
     this._stopFF();       // and any running fast-forward
+    this._godMode = false;
     const c = this.refs;
     c.curtainWho.textContent = 'PLAYER ' + (player + 1);
     c.curtainWho.className = 'who ' + (player === 0 ? 'p1' : 'p2');
     c.curtainMsg.textContent = `Turn ${this.game.turn + 1}. Make sure Player ${player + 1} is at the controls and the other player cannot see the screen. Your orders are planned in secret.`;
     c.curtain.classList.add('show');
-    const btn = c.curtainBtn;
+    const btn = c.curtainBtn, god = c.curtainGodBtn;
     btn.className = 'primary';
-    const handler = () => { btn.removeEventListener('click', handler); c.curtain.classList.remove('show'); onReady(); };
-    btn.addEventListener('click', handler);
+    god.style.display = player === 0 ? '' : 'none'; // start-of-turn only
+    const cleanup = () => { btn.removeEventListener('click', onReadyH); god.removeEventListener('click', onGodH); };
+    const onReadyH = () => { cleanup(); c.curtain.classList.remove('show'); onReady(); };
+    const onGodH = () => { cleanup(); c.curtain.classList.remove('show'); this.enterGodMode(); };
+    btn.addEventListener('click', onReadyH);
+    god.addEventListener('click', onGodH);
+  };
+
+  /* ---------- god mode (debug): god view + fast-forward only ---------- */
+  UI.enterGodMode = function () {
+    this._godMode = true;
+    document.body.className = '';
+    this.refs.turn.textContent = 'TURN ' + (this.game.turn + 1);
+    this.refs.phase.textContent = 'GOD MODE (debug)';
+    this.refs.phase.className = 'phase resolve';
+    this._showGodPanel();
+    this._renderGod();
+  };
+
+  UI.exitGodMode = function () {
+    this._godMode = false;
+    this.passTo(0, () => this.beginPlanning(0));
+  };
+
+  UI._renderGod = function () {
+    const s = View.buildGodScene(this.game);
+    this.renderer.setScene(s.primitives, s.target);
+    this._godLegend();
+  };
+
+  UI._showGodPanel = function () {
+    const root = this.refs.console; root.innerHTML = '';
+    const sec = el('div', { class: 'sec' }, [el('h3', null, ['God Mode (debug)'])]);
+    sec.appendChild(el('div', { class: 'muted' }, ['All objects from both players, true positions.']));
+    const ffRow = el('div', { class: 'row' }, [el('label', null, ['FF turns'])]);
+    const ffNum = el('input', { type: 'number', min: 1, max: 60, step: 1, value: 10 });
+    const ffBtn = el('button', { onclick: () => this.fastForward(parseInt(ffNum.value, 10)) }, ['⏩ FAST-FORWARD']);
+    ffRow.appendChild(ffNum); ffRow.appendChild(ffBtn);
+    sec.appendChild(ffRow);
+    sec.appendChild(el('div', { class: 'muted' }, ['advance N turns with both ships idle, 1 turn/sec']));
+    root.appendChild(sec);
+    const exitSec = el('div', { class: 'sec' }, []);
+    exitSec.appendChild(el('button', { class: 'primary', style: 'width:100%;padding:10px;', onclick: () => this.exitGodMode() }, ['◀ EXIT GOD MODE']));
+    root.appendChild(exitSec);
   };
 
   UI.beginPlanning = function (player) {
@@ -168,16 +214,8 @@
     eSec.appendChild(r.warn);
     root.appendChild(eSec);
 
-    // DEBUG · FAST-FORWARD (advance N idle turns at 1/sec to observe light-lag)
-    const dSec = el('div', { class: 'sec' }, [el('h3', null, ['Debug'])]);
-    const ffRow = el('div', { class: 'row' }, [el('label', null, ['FF turns'])]);
-    const ffNum = el('input', { type: 'number', min: 1, max: 60, step: 1, value: 10 });
-    const ffBtn = el('button', { onclick: () => this.fastForward(parseInt(ffNum.value, 10)) }, ['⏩ FAST-FORWARD']);
-    ffRow.appendChild(ffNum); ffRow.appendChild(ffBtn);
-    dSec.appendChild(ffRow);
-    dSec.appendChild(el('div', { class: 'muted' }, ['advance N turns with both ships idle, 1 turn/sec']));
-    dSec.appendChild(this._godToggle());
-    root.appendChild(dSec);
+    // (Debug tools — fast-forward & god view — live in God Mode, entered from the
+    //  start-of-turn curtain, so they can never abandon a half-made plan.)
 
     // LOG
     const lSec = el('div', { class: 'sec' }, [el('h3', null, ['Battle Log'])]);
@@ -286,34 +324,13 @@
   };
 
   UI.refreshScene = function () {
-    if (this.godView) {
-      const s = View.buildGodScene(this.game);
-      this.renderer.setScene(s.primitives, s.target);
-      this._godLegend();
-    } else {
-      const s = View.buildPlanScene(this.game, this.player, this.plan, { showSolution: this.plan.showSolution });
-      this.renderer.setScene(s.primitives, s.target);
-      this.updateLegend(false);
-    }
+    const { primitives, target } = View.buildPlanScene(this.game, this.player, this.plan, { showSolution: this.plan.showSolution });
+    this.renderer.setScene(primitives, target);
   };
 
   UI._godLegend = function () {
-    this.refs.legend.innerHTML = '<b style="color:#ffd34e">GOD VIEW (debug)</b> — every object, true positions';
+    this.refs.legend.innerHTML = '<b style="color:#ffd34e">GOD MODE (debug)</b> — every object, true positions';
     this.refs.hint.textContent = 'omniscient debug view · drag to orbit · scroll to zoom';
-  };
-
-  /* re-render whichever view is currently live (planning or fast-forward) */
-  UI._refreshActive = function () {
-    if (this._ffActive) this._renderFF(); else this.refreshScene();
-  };
-
-  /* a debug checkbox bound to UI.godView, reused in the console and the FF panel */
-  UI._godToggle = function () {
-    const lbl = el('label', { class: 'muted', style: 'display:flex;gap:6px;align-items:center;margin-top:6px;cursor:pointer;' }, []);
-    const cb = el('input', { type: 'checkbox' }); cb.checked = !!this.godView;
-    cb.addEventListener('change', () => { this.godView = cb.checked; this._refreshActive(); });
-    lbl.appendChild(cb); lbl.appendChild(document.createTextNode('👁 show all objects (god view · truth)'));
-    return lbl;
   };
 
   UI.renderLog = function () {
@@ -421,8 +438,11 @@
   UI._ffEnd = function () {
     const over = this.game.phase === 'gameover';
     this._stopFF();
-    if (over) { this.gameOver(); return; }
-    this.passTo(0, () => this.beginPlanning(0));
+    if (over) { this._godMode = false; this.gameOver(); return; }
+    // fast-forward only runs inside god mode — return to the god-mode panel
+    this._showGodPanel();
+    this._renderGod();
+    this.refs.phase.textContent = 'GOD MODE (debug)';
   };
 
   UI._renderFF = function () {
@@ -430,24 +450,17 @@
     this.refs.phase.textContent = 'FAST-FWD · ' + this._ffRemaining + ' left';
     this.refs.phase.className = 'phase resolve';
     if (this._ffStatus) this._ffStatus.textContent = `advancing… turn ${this.game.turn}, ${this._ffRemaining} remaining`;
-    let s;
-    if (this.godView) {
-      s = View.buildGodScene(this.game);
-      this._godLegend();
-    } else {
-      s = View.buildPlanScene(this.game, this.player, { move: V.of(), weapon: 'none', shield: 0 }, {});
-      this.refs.legend.innerHTML = '<b style="color:var(--warn)">FAST-FORWARD</b> — your delayed sensors';
-    }
+    const s = View.buildGodScene(this.game); // FF runs in god mode -> always the truth view
     this.renderer.setScene(s.primitives, s.target);
+    this._godLegend();
   };
 
   UI._showFFPanel = function () {
     document.body.className = '';
     const root = this.refs.console; root.innerHTML = '';
-    const sec = el('div', { class: 'sec' }, [el('h3', null, ['Fast-Forward (debug)'])]);
+    const sec = el('div', { class: 'sec' }, [el('h3', null, ['Fast-Forward (god mode)'])]);
     this._ffStatus = el('div', { class: 'muted' }, ['advancing…']);
     sec.appendChild(this._ffStatus);
-    sec.appendChild(this._godToggle());
     const stop = el('button', { class: 'primary', style: 'width:100%;padding:10px;margin-top:8px;', onclick: () => { this._ffRemaining = 0; this._ffEnd(); } }, ['■ STOP']);
     sec.appendChild(stop);
     root.appendChild(sec);
