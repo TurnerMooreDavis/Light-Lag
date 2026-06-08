@@ -27,8 +27,8 @@ const { Runner, loadPage } = require('./harness');
     if (opts.weapon) UI.selectWeapon(opts.weapon);
     const wCost = opts.weapon && opts.weapon !== 'none' ? CONFIG.weapons[opts.weapon].cost : 0;
     const shield = opts.shield || 0;
-    const moveUnits = Math.min(CONFIG.maxSpeed, Math.max(0, CONFIG.energyPerTurn - wCost - shield) / CONFIG.moveCost);
-    UI.plan.move = V.scale(towardDir(player), moveUnits);
+    const thrust = Math.min(CONFIG.maxAccel, Math.max(0, CONFIG.energyPerTurn - wCost - shield) / CONFIG.accelCost);
+    UI.plan.accel = V.scale(towardDir(player), thrust);
     if (wCost) UI.plan.aim = UI.firingSolutionAim() || UI.apparentAim();
     if (shield) { UI.plan.shield = shield; UI.faceShield('enemy'); }
     UI.onPlanChanged();
@@ -37,6 +37,7 @@ const { Runner, loadPage } = require('./harness');
   }
 
   // ---------- a full duel ----------
+  const openingBlind = !game.observeEnemy(0).visible; // turn 0, 100u apart => no light yet
   let sawEnemyAtTurn = null, hits = 0, exception = null;
   try {
     for (let turn = 0; turn < 40 && game.phase !== 'gameover'; turn++) {
@@ -50,7 +51,11 @@ const { Runner, loadPage } = require('./harness');
     }
   } catch (e) { exception = e; }
   t.ok('no exception across a full duel', !exception, exception && exception.stack);
-  t.ok('first contact delayed by light-lag (8-10 turns)', sawEnemyAtTurn >= 8 && sawEnemyAtTurn <= 10, 'sawEnemyAtTurn=' + sawEnemyAtTurn);
+  // light-lag invariant: you are blind at the opening, and contact (if any) is never
+  // instantaneous. With inertia, aggressive closing can even end the duel before light
+  // arrives (sawEnemyAtTurn === null) — the deterministic turn-10 case is unit-tested.
+  t.ok('enemy hidden by light-lag at the opening', openingBlind);
+  t.ok('contact never beats the light front', sawEnemyAtTurn === null || sawEnemyAtTurn >= 8, 'sawEnemyAtTurn=' + sawEnemyAtTurn);
   t.ok('at least one hit landed', hits > 0, 'hits=' + hits);
   t.ok('the duel reached a conclusion', game.phase === 'gameover');
   t.ok('a winner was decided', game.winner === 0 || game.winner === 1 || game.winner === 'draw');
@@ -112,7 +117,7 @@ const { Runner, loadPage } = require('./harness');
   // ---------- planning console no longer carries debug/FF; gizmo still draws ----------
   clickCurtain(); // start player 1's turn
   t.ok('planning console has no fast-forward/debug controls', !/FAST-FORWARD/.test(consoleText()));
-  t.ok('plan scene has no world-axis primitive', !LL.View.buildPlanScene(game, 0, { move: V.of(), weapon: 'none' }, {}).primitives.some((p) => p.type === 'axes'));
+  t.ok('plan scene has no world-axis primitive', !LL.View.buildPlanScene(game, 0, { accel: V.of(), weapon: 'none' }, {}).primitives.some((p) => p.type === 'axes'));
   let drawErr2 = null; try { LL.renderer.draw(); } catch (e) { drawErr2 = e; }
   t.ok('renderer.draw (with gizmo) runs in planning', !drawErr2, drawErr2 && drawErr2.stack);
 

@@ -52,8 +52,12 @@ Both players plan **simultaneously and in secret**, then the turn resolves toget
 1. **Pass-the-device curtain** — hand the screen to the named player; the other
    must not watch.
 2. **Plan** on the Tactical Console (right panel):
-   - **Maneuver** — set your Δx/Δy/Δz displacement (capped at max speed). Costs
-     energy per unit. `TOWARD` / `AWAY` / `HOLD` helpers included.
+   - **Thrust** — ships have **inertia**. The ax/ay/az inputs are *acceleration*
+     (Δv, capped per turn) applied to a persistent velocity, up to a terminal
+     speed. **Coasting at constant velocity is free**; only thrust costs energy —
+     so a straight-line coaster is cheap but perfectly predictable (easy to lead),
+     while dodging costs energy *and* takes turns (you can't stop or reverse on a
+     dime). `COAST` (no thrust) / `BRAKE` (kill momentum) / `TOWARD` / `AWAY` helpers.
    - **Weapons** — `LASER`, `TORPEDO`, or `HOLD FIRE`. Pick an aim point
      numerically (the depth axis is a number, not an ambiguous click), or hit
      **◎ FIRING SOLUTION** to auto-lead the target, then nudge with `−`/`+`.

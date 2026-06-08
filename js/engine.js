@@ -14,8 +14,9 @@
     normalTurnCap: 40,     // overtime (shrink) begins after this turn
     arenaShrinkPerTurn: 3, // boundary closes this fast in overtime
     hardTurnCap: 110,      // absolute safety stop
-    maxSpeed: 3,           // max ship displacement per turn (0.3c; "move 2x" is a normal move)
-    moveCost: 2,           // energy per unit moved — firing the laser forces you to slow down
+    maxAccel: 3,           // max change in velocity per turn (the thrust input; slider range)
+    maxSpeed: 6,           // terminal velocity cap (0.6c; well under c=10 so the light solver stays valid)
+    accelCost: 2,          // energy per unit of thrust — coasting at constant velocity is FREE
     energyPerTurn: 12,     // use-it-or-lose-it budget each turn
     startHP: 100,
     hitRadius: 5,          // direct-hit distance (a real target inside the uncertainty cloud)
@@ -33,7 +34,7 @@
   function makeShip(owner, pos) {
     return {
       id: nextId(), kind: 'ship', owner,
-      pos: V.clone(pos), hp: CONFIG.startHP, alive: true,
+      pos: V.clone(pos), vel: V.of(), hp: CONFIG.startHP, alive: true,
       damageDealt: 0,
       history: [{ t: 0, pos: V.clone(pos) }],
       shield: { strength: 0, dir: V.of(0, 0, 0) }, // active during the resolving tick
@@ -81,14 +82,14 @@
   /* --- plan cost / validation -------------------------------------------- */
   Game.prototype.planCost = function (plan) {
     if (!plan) return 0;
-    let cost = V.len(plan.move || V.of()) * CONFIG.moveCost;
+    let cost = V.len(plan.accel || V.of()) * CONFIG.accelCost;
     if (plan.weapon && plan.weapon !== 'none') cost += CONFIG.weapons[plan.weapon].cost;
     cost += plan.shield || 0;
     return cost;
   };
   Game.prototype.planValid = function (plan) {
     if (!plan) return false;
-    if (V.len(plan.move || V.of()) > CONFIG.maxSpeed + 1e-6) return false;
+    if (V.len(plan.accel || V.of()) > CONFIG.maxAccel + 1e-6) return false;
     if ((plan.shield || 0) > CONFIG.shield.maxStrength + 1e-6) return false;
     return this.planCost(plan) <= CONFIG.energyPerTurn + 1e-6;
   };
@@ -100,8 +101,8 @@
   /* Advance exactly one turn with BOTH players idle. Used by fast-forward to
    * observe light-lag / debug behaviours without either ship acting. */
   Game.prototype.idleTurn = function () {
-    this.submitPlan(0, { move: V.of(), weapon: 'none', shield: 0 });
-    this.submitPlan(1, { move: V.of(), weapon: 'none', shield: 0 });
+    this.submitPlan(0, { accel: V.of(), weapon: 'none', shield: 0 });
+    this.submitPlan(1, { accel: V.of(), weapon: 'none', shield: 0 });
     return this.resolve();
   };
 
@@ -152,10 +153,19 @@
     // 1) ships move + set shields for this tick
     this.ships.forEach((s, i) => {
       const plan = this.plans[i] || {};
-      let mv = V.clampLen(plan.move || V.of(), CONFIG.maxSpeed);
-      let np = V.add(s.pos, mv);
-      // clamp to the (possibly shrinking) arena boundary
-      if (V.len(np) > R) np = V.scale(V.normalize(np), R);
+      // Inertia: thrust changes a persistent velocity (capped), then position
+      // advances by that velocity (semi-implicit Euler). Coasting needs no thrust.
+      const a = V.clampLen(plan.accel || V.of(), CONFIG.maxAccel);
+      let v = V.clampLen(V.add(s.vel, a), CONFIG.maxSpeed);
+      let np = V.add(s.pos, v);
+      // arena wall: clamp position and cancel the outward velocity component (no bounce)
+      if (V.len(np) > R) {
+        const n = V.normalize(np);
+        np = V.scale(n, R);
+        const outward = V.dot(v, n);
+        if (outward > 0) v = V.sub(v, V.scale(n, outward));
+      }
+      s.vel = v;
       s.pos = np;
       s.history.push({ t: T1, pos: V.clone(np) });
       s.shield = {
@@ -246,7 +256,7 @@
    * weapon, then scaling the move — so move > weapon > shield in priority. */
   Game.prototype._enforceBudget = function (plan) {
     const p = {
-      move: plan.move ? V.clampLen(plan.move, CONFIG.maxSpeed) : V.of(),
+      accel: plan.accel ? V.clampLen(plan.accel, CONFIG.maxAccel) : V.of(),
       weapon: plan.weapon || 'none',
       aim: plan.aim || null,
       shield: Math.max(0, Math.min(plan.shield || 0, CONFIG.shield.maxStrength)),
@@ -256,8 +266,8 @@
     if (over() > 1e-9 && p.shield > 0) p.shield = Math.max(0, p.shield - Math.ceil(over()));
     if (over() > 1e-9 && p.weapon !== 'none') { p.weapon = 'none'; p.aim = null; }
     if (over() > 1e-9) {
-      const maxUnits = Math.max(0, CONFIG.energyPerTurn - p.shield) / CONFIG.moveCost;
-      p.move = V.clampLen(p.move, Math.min(CONFIG.maxSpeed, maxUnits));
+      const maxUnits = Math.max(0, CONFIG.energyPerTurn - p.shield) / CONFIG.accelCost;
+      p.accel = V.clampLen(p.accel, Math.min(CONFIG.maxAccel, maxUnits));
     }
     if (p.shield === 0) p.shieldDir = null;
     return p;

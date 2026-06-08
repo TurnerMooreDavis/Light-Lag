@@ -84,19 +84,19 @@ const t = new Runner('unit');
 (() => {
   const g = new Engine();
   t.approx('ships start 100u apart', V.dist(g.ships[0].pos, g.ships[1].pos), 100, 1e-6);
-  t.ok('plan within budget valid', g.planValid({ move: V.of(2, 0, 0), weapon: 'torpedo', shield: 0 }));
-  t.ok('over-budget plan invalid', !g.planValid({ move: V.of(3, 0, 0), weapon: 'laser', shield: 8 }));
-  t.ok('over-speed plan invalid', !g.planValid({ move: V.of(9, 0, 0), weapon: 'none' }));
+  t.ok('plan within budget valid', g.planValid({ accel: V.of(2, 0, 0), weapon: 'torpedo', shield: 0 }));
+  t.ok('over-budget plan invalid', !g.planValid({ accel: V.of(3, 0, 0), weapon: 'laser', shield: 8 }));
+  t.ok('over-speed plan invalid', !g.planValid({ accel: V.of(9, 0, 0), weapon: 'none' }));
 
   // engine enforces budget even if a plan bypasses the UI
-  const sane = g._enforceBudget({ move: V.of(3, 0, 0), weapon: 'laser', aim: V.of(50, 0, 0), shield: 8, shieldDir: V.of(0, 0, 0) });
+  const sane = g._enforceBudget({ accel: V.of(3, 0, 0), weapon: 'laser', aim: V.of(50, 0, 0), shield: 8, shieldDir: V.of(0, 0, 0) });
   t.ok('enforceBudget brings cost within budget', g.planCost(sane) <= CONFIG.energyPerTurn + 1e-9);
   t.ok('enforceBudget sheds shield first', sane.shield === 0);
 
   // the author's opening scenario: both move + fire, nothing connects, both blind
   const g2 = new Engine();
-  g2.submitPlan(0, { move: V.of(2, 0, 0), weapon: 'torpedo', aim: V.of(50, 0, 0) });
-  g2.submitPlan(1, { move: V.of(0, 2, 0), weapon: 'torpedo', aim: V.of(-50, 0, 0) });
+  g2.submitPlan(0, { accel: V.of(2, 0, 0), weapon: 'torpedo', aim: V.of(50, 0, 0) });
+  g2.submitPlan(1, { accel: V.of(0, 2, 0), weapon: 'torpedo', aim: V.of(-50, 0, 0) });
   const r1 = g2.resolve();
   t.ok('turn 1: no hits', r1.hits.length === 0);
   t.ok('turn 1: two torpedoes launched', r1.spawns.length === 2);
@@ -122,6 +122,45 @@ const t = new Runner('unit');
   t.ok('idleTurn stores reports', g.reports.length === g.turn);
 })();
 
+/* ===================== engine: inertia (acceleration movement model) ===================== */
+(() => {
+  const fresh = () => { const g = new Engine(); g.ships[0].pos = V.of(0, 0, 0); g.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }]; return g; };
+
+  // from rest, one turn of thrust a sets velocity a and moves by a
+  const g = fresh();
+  g.submitPlan(0, { accel: V.of(3, 0, 0), weapon: 'none' }); g.submitPlan(1, { accel: V.of(), weapon: 'none' }); g.resolve();
+  t.ok('thrust from rest sets velocity', V.eq(g.ships[0].vel, V.of(3, 0, 0)));
+  t.approx('one turn from rest moves by thrust', g.ships[0].pos.x, 3);
+  // COASTING: with no thrust, velocity persists and the ship keeps moving (inertia)
+  g.submitPlan(0, { accel: V.of(), weapon: 'none' }); g.submitPlan(1, { accel: V.of(), weapon: 'none' }); g.resolve();
+  t.ok('coasting keeps velocity', V.eq(g.ships[0].vel, V.of(3, 0, 0)));
+  t.approx('coasting keeps moving without thrust', g.ships[0].pos.x, 6);
+
+  // velocity accumulates only up to the terminal cap, and stays under c
+  const g2 = fresh();
+  for (let i = 0; i < 6; i++) { g2.submitPlan(0, { accel: V.of(3, 0, 0), weapon: 'none' }); g2.submitPlan(1, { accel: V.of(), weapon: 'none' }); g2.resolve(); }
+  t.approx('velocity capped at terminal maxSpeed', V.len(g2.ships[0].vel), CONFIG.maxSpeed);
+  t.ok('terminal speed stays below c (solver validity)', CONFIG.maxSpeed < CONFIG.c);
+  t.ok('accel cap < terminal => real momentum (multi-turn ramp)', CONFIG.maxAccel < CONFIG.maxSpeed);
+
+  // BRAKING: thrust opposite to velocity bleeds speed but cannot stop instantly from top speed
+  const vTop = V.len(g2.ships[0].vel);
+  g2.submitPlan(0, { accel: V.clampLen(V.neg(g2.ships[0].vel), CONFIG.maxAccel), weapon: 'none' }); g2.submitPlan(1, { accel: V.of(), weapon: 'none' }); g2.resolve();
+  t.ok('braking reduces speed', V.len(g2.ships[0].vel) < vTop - 1e-6);
+  t.ok('cannot fully stop from top speed in one turn', V.len(g2.ships[0].vel) > 1e-6);
+
+  // economy: coasting is FREE, thrust costs accelCost per unit
+  t.approx('coasting is free (only the weapon costs)', g.planCost({ accel: V.of(), weapon: 'laser' }), CONFIG.weapons.laser.cost);
+  t.approx('thrust costs accelCost per unit', g.planCost({ accel: V.of(3, 0, 0), weapon: 'none' }), 3 * CONFIG.accelCost);
+
+  // arena wall clamps position AND cancels the outward velocity component (no bounce / no pile-up)
+  const g3 = new Engine(); const R = g3.arenaRadius();
+  g3.ships[0].pos = V.of(R - 1, 0, 0); g3.ships[0].vel = V.of(5, 0, 0); g3.ships[0].history = [{ t: 0, pos: V.of(R - 1, 0, 0) }];
+  g3.submitPlan(0, { accel: V.of(), weapon: 'none' }); g3.submitPlan(1, { accel: V.of(), weapon: 'none' }); g3.resolve();
+  t.ok('ship clamped inside arena', V.len(g3.ships[0].pos) <= R + 1e-6);
+  t.approx('outward velocity cancelled at the wall', g3.ships[0].vel.x, 0, 1e-6);
+})();
+
 /* ===================== engine: combat, shields, overkill, tiebreak ===================== */
 (() => {
   // laser eventually hits a near, stationary target and deals damage credited to firer
@@ -130,8 +169,8 @@ const t = new Runner('unit');
   g.ships[1].pos = V.of(10, 0, 0); g.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }];
   let hit = false;
   for (let i = 0; i < 4 && !hit; i++) {
-    g.submitPlan(0, { move: V.of(), weapon: i === 0 ? 'laser' : 'none', aim: V.of(10, 0, 0) });
-    g.submitPlan(1, { move: V.of(), weapon: 'none' });
+    g.submitPlan(0, { accel: V.of(), weapon: i === 0 ? 'laser' : 'none', aim: V.of(10, 0, 0) });
+    g.submitPlan(1, { accel: V.of(), weapon: 'none' });
     if (g.resolve().hits.length) hit = true;
   }
   t.ok('laser hits stationary target', hit);
@@ -141,8 +180,8 @@ const t = new Runner('unit');
   // shield direction is anchored at the POST-move position (not pre-move)
   const gs = new Engine();
   gs.ships[1].pos = V.of(0, 0, 0); gs.ships[1].history = [{ t: 0, pos: V.of(0, 0, 0) }];
-  gs.submitPlan(0, { move: V.of(), weapon: 'none' });
-  gs.submitPlan(1, { move: V.of(3, 0, 0), weapon: 'none', shield: 2, shieldDir: V.of(0, 10, 0) });
+  gs.submitPlan(0, { accel: V.of(), weapon: 'none' });
+  gs.submitPlan(1, { accel: V.of(3, 0, 0), weapon: 'none', shield: 2, shieldDir: V.of(0, 10, 0) });
   gs.resolve();
   const expected = V.normalize(V.sub(V.of(0, 10, 0), V.of(3, 0, 0))); // from post-move (3,0,0)
   t.ok('shield cone anchored post-move', V.eq(gs.ships[1].shield.dir, expected, 1e-6));
@@ -154,8 +193,8 @@ const t = new Runner('unit');
     gg.ships[1].pos = V.of(10, 0, 0); gg.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }];
     let blocked = 0, dealt = 0;
     for (let i = 0; i < 4; i++) {
-      gg.submitPlan(0, { move: V.of(), weapon: i === 0 ? 'laser' : 'none', aim: V.of(10, 0, 0) });
-      gg.submitPlan(1, { move: V.of(), weapon: 'none', shield: 8, shieldDir: V.of(faceX, 0, 0) });
+      gg.submitPlan(0, { accel: V.of(), weapon: i === 0 ? 'laser' : 'none', aim: V.of(10, 0, 0) });
+      gg.submitPlan(1, { accel: V.of(), weapon: 'none', shield: 8, shieldDir: V.of(faceX, 0, 0) });
       const r = gg.resolve();
       r.hits.forEach((h) => { if (h.target === 1) { blocked += h.blocked; dealt += h.damage; } });
       if (gg.phase !== 'plan') break;
@@ -171,7 +210,7 @@ const t = new Runner('unit');
   go.ships[1].pos = V.of(10, 0, 0); go.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }]; go.ships[1].hp = 10;
   const laser = () => ({ id: 1, kind: 'proj', type: 'laser', owner: 0, pos: V.of(0, 0, 0), vel: V.of(10, 0, 0), history: [{ t: 0, pos: V.of(0, 0, 0) }], spawnT: 0, life: 50, damage: 45, splash: 0, alive: true });
   go.projectiles = [laser(), laser()];
-  go.submitPlan(0, { move: V.of(), weapon: 'none' }); go.submitPlan(1, { move: V.of(), weapon: 'none' });
+  go.submitPlan(0, { accel: V.of(), weapon: 'none' }); go.submitPlan(1, { accel: V.of(), weapon: 'none' });
   const ro = go.resolve();
   t.ok('doomed ship is destroyed', !go.ships[1].alive);
   t.ok('only one hit registered on the kill tick', ro.hits.filter((h) => h.target === 1).length === 1);
@@ -182,7 +221,7 @@ const t = new Runner('unit');
   gt.ships[1].pos = V.of(0, 0, 0); gt.ships[1].history = [{ t: 0, pos: V.of(0, 0, 0) }];
   const w = CONFIG.weapons.torpedo;
   gt.projectiles = [{ id: 2, kind: 'proj', type: 'torpedo', owner: 0, pos: V.of(-w.speed, w.splash - 1, 0), vel: V.of(w.speed, 0, 0), history: [{ t: 0, pos: V.of(-w.speed, w.splash - 1, 0) }], spawnT: 0, life: w.life, damage: w.damage, splash: w.splash, alive: true }];
-  gt.submitPlan(0, { move: V.of(), weapon: 'none' }); gt.submitPlan(1, { move: V.of(), weapon: 'none' });
+  gt.submitPlan(0, { accel: V.of(), weapon: 'none' }); gt.submitPlan(1, { accel: V.of(), weapon: 'none' });
   const rt = gt.resolve();
   t.ok('torpedo near-miss detonates with splash', rt.hits.length === 1);
   t.ok('splash damage is reduced (not full)', rt.hits[0].damage > 0 && rt.hits[0].damage < w.damage);
@@ -213,8 +252,8 @@ const t = new Runner('unit');
   gl.ships[0].pos = V.of(0, 0, 0); gl.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }];
   gl.ships[1].pos = V.of(10, 0, 0); gl.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }];
   for (let i = 0; i < 3; i++) {
-    gl.submitPlan(0, { move: V.of(), weapon: i === 0 ? 'laser' : 'none', aim: V.of(10, 0, 0) });
-    gl.submitPlan(1, { move: V.of(), weapon: 'none' });
+    gl.submitPlan(0, { accel: V.of(), weapon: i === 0 ? 'laser' : 'none', aim: V.of(10, 0, 0) });
+    gl.submitPlan(1, { accel: V.of(), weapon: 'none' });
     gl.resolve();
   }
   t.ok('every log entry is tagged to a player', gl.log.length > 0 && gl.log.every((e) => e.to === 0 || e.to === 1));
@@ -230,19 +269,19 @@ const t = new Runner('unit');
   t.ok('backdrop has grid + sphere + starfield', ['grid', 'sphere', 'starfield'].every((tp) => bd.some((p) => p.type === tp)));
 
   // before contact: NO SIGNAL label, no enemy ghost ship
-  const early = View.buildPlanScene(g, 0, { move: V.of(), weapon: 'none' }, {});
+  const early = View.buildPlanScene(g, 0, { accel: V.of(), weapon: 'none' }, {});
   t.ok('pre-contact shows NO SIGNAL', early.primitives.some((p) => p.type === 'label' && /NO SIGNAL/.test(p.text)));
   t.ok('pre-contact draws no enemy ghost ship', !early.primitives.some((p) => p.type === 'ship' && p.ghost));
 
   // camera framing must use the APPARENT enemy, never the true (hidden) position.
   // Move the enemy (P1) in +y while P0 stays put and observes.
   for (let i = 0; i < 12; i++) {
-    g.submitPlan(0, { move: V.of(), weapon: 'none' });
-    g.submitPlan(1, { move: V.of(0, 3, 0), weapon: 'none' });
+    g.submitPlan(0, { accel: V.of(), weapon: 'none' });
+    g.submitPlan(1, { accel: V.of(0, 3, 0), weapon: 'none' });
     g.resolve();
   }
   const ob = g.observeEnemy(0);
-  const scene = View.buildPlanScene(g, 0, { move: V.of(), weapon: 'none' }, {});
+  const scene = View.buildPlanScene(g, 0, { accel: V.of(), weapon: 'none' }, {});
   t.ok('enemy now visible as a delayed ghost', ob.visible && scene.primitives.some((p) => p.type === 'ship' && p.ghost));
   t.ok('contact shows age badge', scene.primitives.some((p) => p.type === 'label' && /light T−/.test(p.text)));
   t.ok('uncertainty bubble drawn', scene.primitives.some((p) => p.type === 'bubble'));
@@ -279,7 +318,7 @@ const t = new Runner('unit');
 
   // contrast: at turn 0 the plan view hides the enemy (light-lag), god view reveals it
   const g2 = new Engine();
-  const planShips = View.buildPlanScene(g2, 0, { move: V.of(), weapon: 'none' }, {}).primitives.filter((p) => p.type === 'ship');
+  const planShips = View.buildPlanScene(g2, 0, { accel: V.of(), weapon: 'none' }, {}).primitives.filter((p) => p.type === 'ship');
   t.ok('plan view shows only own ship early', planShips.length === 1);
   t.ok('god view reveals the enemy even before its light arrives', View.buildGodScene(g2).primitives.filter((p) => p.type === 'ship').length === 2);
 })();

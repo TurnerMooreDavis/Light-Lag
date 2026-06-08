@@ -44,14 +44,19 @@
     prim.push({ type: 'ship', pos: me.pos, color: myCol, size: 10, dropLine: true });
     prim.push({ type: 'label', pos: me.pos, text: `YOU · HP ${me.hp.toFixed(0)}`, color: myCol, dy: -16, bg: '#04070d' });
 
-    // --- planned move ---
-    const mv = V.clampLen(plan.move || V.of(), CFG.maxSpeed);
-    if (V.len(mv) > 1e-3) {
-      const dest = V.add(me.pos, mv);
+    // --- momentum + planned thrust (inertia) ---
+    // current velocity carries the ship forward; this turn's thrust bends it.
+    const accel = V.clampLen(plan.accel || V.of(), CFG.maxAccel);
+    const nextVel = V.clampLen(V.add(me.vel, accel), CFG.maxSpeed);
+    const dest = V.add(me.pos, nextVel);                 // where the ship will actually be next turn
+    if (V.len(me.vel) > 1e-3) {                           // faint arrow = current momentum (coast)
+      prim.push({ type: 'arrow', a: me.pos, b: V.add(me.pos, me.vel), color: myCol, width: 1, dash: [2, 3] });
+    }
+    if (V.dist(dest, me.pos) > 1e-3) {                    // solid arrow = resulting heading after thrust
       prim.push({ type: 'arrow', a: me.pos, b: dest, color: myCol, width: 1.5 });
       prim.push({ type: 'ship', pos: dest, color: myCol, size: 9, ghost: true, dash: [3, 3], dropLine: true });
     }
-    const muzzle = V.add(me.pos, mv);
+    const muzzle = dest;                                  // a fired weapon spawns at the post-move position
 
     // --- own weapon plan ---
     if (plan.weapon && plan.weapon !== 'none' && plan.aim) {
@@ -184,7 +189,8 @@
     const prim = backdrop(game.arenaRadius(), game.inOvertime());
     game.ships.forEach((s, i) => {
       prim.push({ type: 'ship', pos: s.pos, color: COL[i], size: 10, dropLine: true, ghost: !s.alive });
-      prim.push({ type: 'label', pos: s.pos, text: `P${i + 1} · HP ${s.hp.toFixed(0)} · ${V.fmt(s.pos, 0)}`, color: COL[i], dy: -16, bg: '#04070d' });
+      if (V.len(s.vel) > 1e-3) prim.push({ type: 'arrow', a: s.pos, b: V.add(s.pos, s.vel), color: COL[i], width: 1.2 });
+      prim.push({ type: 'label', pos: s.pos, text: `P${i + 1} · HP ${s.hp.toFixed(0)} · v ${V.len(s.vel).toFixed(1)}`, color: COL[i], dy: -16, bg: '#04070d' });
     });
     let live = 0;
     for (const pr of game.projectiles) {

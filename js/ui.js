@@ -118,8 +118,8 @@
     this.refs.turn.textContent = 'TURN ' + (this.game.turn + 1);
     this.refs.phase.textContent = 'PLAYER ' + (player + 1) + ' · PLAN';
     this.refs.phase.className = 'phase ' + (player === 0 ? 'p1' : 'p2');
-    // fresh plan with sensible defaults
-    this.plan = { move: V.of(), weapon: 'none', aim: null, shield: 0, shieldDir: null, showSolution: true };
+    // fresh plan with sensible defaults (accel = thrust applied to persistent velocity)
+    this.plan = { accel: V.of(), weapon: 'none', aim: null, shield: 0, shieldDir: null, showSolution: true };
     this.buildConsole();
     this.updateLegend(false);
     this.refreshScene();
@@ -142,27 +142,29 @@
       statLine('HULL', `${me.hp.toFixed(0)} / ${CFG.startHP}`),
       bar('hp', me.hp / CFG.startHP, me.hp > 40 ? 'var(--good)' : 'var(--bad)'),
       statLine('POSITION', V.fmt(me.pos, 0)),
+      statLine('VELOCITY', `${V.fmt(me.vel, 1)} · ${V.len(me.vel).toFixed(1)}/t`),
       el('div', { class: 'statline' }, [el('span', null, ['SENSORS']), el('b', { class: ob.visible ? 'ok' : 'danger' }, [sensor])]),
     ]));
 
-    // MOVEMENT
-    const move = this.plan.move;
-    const moveSec = el('div', { class: 'sec' }, [el('h3', null, [`Maneuver · max ${CFG.maxSpeed}u/turn`])]);
+    // THRUST (acceleration applied to the ship's persistent velocity)
+    const accel = this.plan.accel;
+    const moveSec = el('div', { class: 'sec' }, [el('h3', null, [`Thrust · max accel ${CFG.maxAccel}/turn · top speed ${CFG.maxSpeed}`])]);
     ['x', 'y', 'z'].forEach((ax) => {
       const row = el('div', { class: 'row' }, []);
-      row.appendChild(el('label', null, ['Δ' + ax]));
-      const sl = el('input', { type: 'range', min: -CFG.maxSpeed, max: CFG.maxSpeed, step: 0.5, value: move[ax] });
-      const num = el('input', { type: 'number', min: -CFG.maxSpeed, max: CFG.maxSpeed, step: 0.5, value: move[ax] });
-      const sync = (val) => { this.plan.move[ax] = clampNum(val, -CFG.maxSpeed, CFG.maxSpeed); sl.value = this.plan.move[ax]; num.value = this.plan.move[ax]; this.onPlanChanged(); };
+      row.appendChild(el('label', null, ['a' + ax]));
+      const sl = el('input', { type: 'range', min: -CFG.maxAccel, max: CFG.maxAccel, step: 0.5, value: accel[ax] });
+      const num = el('input', { type: 'number', min: -CFG.maxAccel, max: CFG.maxAccel, step: 0.5, value: accel[ax] });
+      const sync = (val) => { this.plan.accel[ax] = clampNum(val, -CFG.maxAccel, CFG.maxAccel); sl.value = this.plan.accel[ax]; num.value = this.plan.accel[ax]; this.onPlanChanged(); };
       sl.addEventListener('input', () => sync(parseFloat(sl.value)));
       num.addEventListener('input', () => sync(parseFloat(num.value)));
       row.appendChild(sl); row.appendChild(num);
       moveSec.appendChild(row);
     });
     moveSec.appendChild(el('div', { class: 'toolbar' }, [
-      el('button', { onclick: () => { this.plan.move = V.of(); this.buildConsole(); this.onPlanChanged(); } }, ['HOLD']),
-      el('button', { onclick: () => this.setMoveToward(1) }, ['TOWARD']),
-      el('button', { onclick: () => this.setMoveToward(-1) }, ['AWAY']),
+      el('button', { onclick: () => { this.plan.accel = V.of(); this.buildConsole(); this.onPlanChanged(); } }, ['COAST']),
+      el('button', { onclick: () => this.setBrake() }, ['BRAKE']),
+      el('button', { onclick: () => this.setAccelToward(1) }, ['TOWARD']),
+      el('button', { onclick: () => this.setAccelToward(-1) }, ['AWAY']),
     ]));
     r.moveReadout = el('div', { class: 'muted' }, ['']);
     moveSec.appendChild(r.moveReadout);
@@ -274,13 +276,19 @@
     if (key !== 'none') this.plan.aim = this.defaultAim();
     this.buildConsole();
   };
-  UI.setMoveToward = function (sign) {
+  UI.setAccelToward = function (sign) {
     const ob = this.game.observeEnemy(this.player);
     const me = this.game.ship(this.player);
     const tgt = ob.visible ? V.add(ob.pos, V.scale(ob.vel, ob.age || 0)) : this.game.ships[1 - this.player].history[0].pos;
     let dir = V.normalize(V.sub(tgt, me.pos));
     if (V.len2(dir) < 1e-6) dir = V.of(1, 0, 0);
-    this.plan.move = V.scale(dir, sign * CFG.maxSpeed);
+    this.plan.accel = V.scale(dir, sign * CFG.maxAccel);
+    this.buildConsole();
+  };
+  // thrust to kill momentum: accelerate opposite to current velocity (capped)
+  UI.setBrake = function () {
+    const me = this.game.ship(this.player);
+    this.plan.accel = V.clampLen(V.neg(me.vel), CFG.maxAccel);
     this.buildConsole();
   };
   UI.faceShield = function (mode) {
@@ -300,9 +308,14 @@
     if (this.plan.shield > 0 && !this.plan.shieldDir) this.faceShield('enemy');
     const cost = g.planCost(this.plan);
     const over = cost > CFG.energyPerTurn + 1e-6;
-    const speedBad = V.len(this.plan.move) > CFG.maxSpeed + 1e-6;
-    // move readout
-    if (r.moveReadout) r.moveReadout.textContent = `displacement ${V.len(this.plan.move).toFixed(1)}u · cost ${(V.len(this.plan.move) * CFG.moveCost).toFixed(1)}⚡`;
+    const accel = this.plan.accel;
+    const speedBad = V.len(accel) > CFG.maxAccel + 1e-6;
+    // thrust readout: resulting velocity/speed after this turn's thrust
+    if (r.moveReadout) {
+      const me = g.ship(this.player);
+      const nextVel = V.clampLen(V.add(me.vel, accel), CFG.maxSpeed);
+      r.moveReadout.textContent = `thrust ${V.len(accel).toFixed(1)} · ${(V.len(accel) * CFG.accelCost).toFixed(1)}⚡ → speed ${V.len(nextVel).toFixed(1)}/t`;
+    }
     // energy bar
     if (r.energyBar) {
       const frac = Math.min(1, cost / CFG.energyPerTurn);
@@ -319,7 +332,7 @@
     // validity
     const valid = !over && !speedBad;
     if (r.commit) { r.commit.disabled = !valid; }
-    if (r.warn) r.warn.textContent = over ? '⚠ over power budget — reduce orders' : (speedBad ? '⚠ exceeds max speed' : '');
+    if (r.warn) r.warn.textContent = over ? '⚠ over power budget — reduce orders' : (speedBad ? '⚠ exceeds max thrust' : '');
     this.refreshScene();
   };
 
@@ -363,7 +376,7 @@
   /* ---------- commit + resolve ---------- */
   UI.commit = function () {
     if (!this.game.planValid(this.plan)) return;
-    this.game.submitPlan(this.player, { move: V.clone(this.plan.move), weapon: this.plan.weapon, aim: this.plan.aim ? V.clone(this.plan.aim) : null, shield: this.plan.shield, shieldDir: this.plan.shieldDir ? V.clone(this.plan.shieldDir) : null });
+    this.game.submitPlan(this.player, { accel: V.clone(this.plan.accel), weapon: this.plan.weapon, aim: this.plan.aim ? V.clone(this.plan.aim) : null, shield: this.plan.shield, shieldDir: this.plan.shieldDir ? V.clone(this.plan.shieldDir) : null });
     if (this.player === 0) {
       this.passTo(1, () => this.beginPlanning(1));
     } else {
