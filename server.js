@@ -23,9 +23,16 @@ function safeName(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g, '-'); }
 
 function writeLog(obj) {
   fs.mkdirSync(LOGS, { recursive: true });
-  const o = obj && obj.outcome ? obj.outcome : {};
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const file = `game-${stamp}-t${safeName(o.turns)}-w${safeName(o.winner)}.json`;
+  const gid = obj && obj.meta && obj.meta.gameId;
+  let file;
+  if (gid) {
+    // one stable file per game — per-round POSTs overwrite it with the latest log
+    file = `game-${safeName(gid)}.json`;
+  } else {
+    const o = obj && obj.outcome ? obj.outcome : {};
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    file = `game-${stamp}-t${safeName(o.turns)}-w${safeName(o.winner)}.json`;
+  }
   fs.writeFileSync(path.join(LOGS, file), JSON.stringify(obj, null, 2));
   return file;
 }

@@ -72,9 +72,12 @@ npm start            # http://localhost:3000, logs -> ./logs/
 PORT=8080 npm start
 ```
 
-On game over the client POSTs its log to `/api/log` and the server saves it as
-`logs/game-<timestamp>-t<turns>-w<winner>.json`. (Opened from `file://` or a
-plain static server, the download button + console are the fallback.)
+After **every round** (and every fast-forwarded turn) the client POSTs the
+running log to `/api/log`; the server saves **one file per game**
+(`logs/game-<id>.json`), overwritten as it grows — so in-progress and
+fast-forwarded games are captured, not just finished ones. (Opened from
+`file://` or a plain static server, the download button + console are the
+fallback.)
 
 ## Game logs
 

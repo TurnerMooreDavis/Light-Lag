@@ -70,9 +70,29 @@
   UI.startGame = function (mode, aiType) {
     this.mode = mode;
     if (aiType) this.aiType = aiType;
+    this.gameId = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); // unique log file per game
     this.refs.menu.classList.remove('show');
     this.game.reset();
     this.beginTurn();
+  };
+
+  /* Persist the running game after every resolved turn: one file per game,
+   * overwritten with the full cumulative log. Captures in-progress / fast-
+   * forwarded games, not just finished ones. */
+  UI.logTurn = function () {
+    const log = this.game.exportLog({ mode: this.mode, aiType: this.mode === 'ai' ? this.aiType : null, gameId: this.gameId });
+    window.LL.lastGameLog = log;
+    this._postLog(log, false);
+  };
+
+  // fire-and-forget POST to the dev server's /api/log (no-op on static/file://)
+  UI._postLog = function (log, announce) {
+    try {
+      if (typeof fetch !== 'function') return;
+      fetch('/api/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(log) })
+        .then((r) => r.json()).then((j) => { if (announce && j && j.file) console.log('[Light Lag] log saved → logs/' + j.file); })
+        .catch(() => { /* no log endpoint */ });
+    } catch (e) { /* ignore */ }
   };
 
   // "NEW BATTLE" returns to the menu so the mode can be re-chosen
@@ -438,6 +458,7 @@
     // would collapse the light delay to one turn. Each player only ever sees their
     // own light-delayed sensors (and feels hits on themselves) on their own screen.
     g.resolve();
+    this.logTurn(); // persist the run after every resolved turn
     if (g.phase === 'gameover') { this.gameOver(); return; }
     this.refs.phase.textContent = 'TURN ' + g.turn + ' RESOLVED';
     this.refs.phase.className = 'phase resolve';
@@ -496,6 +517,7 @@
     if (!this._ffActive) return;
     if (this._ffRemaining <= 0 || this.game.phase === 'gameover') { this._ffEnd(); return; }
     this._ffTurn();                       // resolve one turn (AIs act, humans coast)
+    this.logTurn();                       // persist after each fast-forwarded turn too
     this._ffRemaining--;
     this.refs.turn.textContent = 'TURN ' + this.game.turn;
     this.refs.phase.textContent = 'FAST-FWD · ' + this._ffRemaining + ' left';
@@ -576,25 +598,11 @@
     root.appendChild(btns);
     root.appendChild(el('div', { class: 'sec muted' }, ['Full game log saved — see the browser console (window.LL.lastGameLog) or download the JSON to share.']));
 
-    // stash + log the complete run so it can be inspected/shared
-    const log = g.exportLog({ mode: this.mode, aiType: this.mode === 'ai' ? this.aiType : null });
-    window.LL.lastGameLog = log;
-    try { console.log('[Light Lag] game log →', log); } catch (e) { /* ignore */ }
-    this.postGameLog(log); // always persist to the server's logs/ folder when one is running
+    // the per-turn logTurn() already saved the final log; surface it for the user
+    this.logTurn();
+    try { console.log('[Light Lag] final game log → logs/game-' + this.gameId + '.json', window.LL.lastGameLog); } catch (e) { /* ignore */ }
 
     this.playReplay(); // auto-roll the reveal once
-  };
-
-  // Fire-and-forget POST so every finished game is written to ./logs by the dev
-  // server (server.js). Harmless when served statically / from file:// — the
-  // download button + console log are the fallback.
-  UI.postGameLog = function (log) {
-    try {
-      if (typeof fetch !== 'function') return;
-      fetch('/api/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(log) })
-        .then((r) => r.json()).then((j) => { if (j && j.file) console.log('[Light Lag] log saved → logs/' + j.file); })
-        .catch(() => { /* no log endpoint (static server / file://) */ });
-    } catch (e) { /* ignore */ }
   };
 
   UI.downloadGameLog = function () {

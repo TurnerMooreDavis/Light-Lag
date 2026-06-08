@@ -137,14 +137,17 @@ const { Runner, loadPage } = require('./harness');
   startMode(/VS HUNTER/);
   t.ok('vs-computer mode engaged', UI.mode === 'ai');
   t.ok('vs-ai opens straight to the human turn (no player-2 hand-off)', doc.getElementById('curtain').classList.contains('show'));
-  let aiErr = null, humanTurns = 0;
+  let aiErr = null, humanTurns = 0, perTurnLogOk = true;
   try {
     for (let i = 0; i < 40 && game.phase !== 'gameover'; i++) {
       clickCurtain();                                  // human readies — there is no second curtain
       planAndCommit(0, { weapon: 'laser', toward: true }); // commit triggers AI plan + resolve
       humanTurns++;
+      // the log is refreshed every round, not just at game over
+      if (!(window.LL.lastGameLog && window.LL.lastGameLog.turns.length === game.turn)) perTurnLogOk = false;
     }
   } catch (e) { aiErr = e; }
+  t.ok('the game log is updated every round (not only at game over)', perTurnLogOk);
   t.ok('vs-ai duel runs without exceptions', !aiErr, aiErr && aiErr.stack);
   t.ok('one human commit resolves exactly one turn (AI auto-plays)', game.turn === humanTurns);
   t.ok('vs-ai reached a conclusion', game.phase === 'gameover');
