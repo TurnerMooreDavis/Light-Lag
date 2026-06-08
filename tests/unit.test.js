@@ -258,4 +258,30 @@ const t = new Runner('unit');
   t.ok('replay includes ship trajectory lines', rep.primitives.some((p) => p.type === 'line'));
 })();
 
+/* ===================== viewmodel: god view (debug, all objects, truth) ===================== */
+(() => {
+  const g = new Engine();
+  g.ships[0].pos = V.of(-20, 0, 0); g.ships[1].pos = V.of(20, 5, 0);
+  g.projectiles = [
+    { id: 1, kind: 'proj', type: 'laser', owner: 0, pos: V.of(-10, 0, 0), vel: V.of(10, 0, 0), alive: true },
+    { id: 2, kind: 'proj', type: 'torpedo', owner: 1, pos: V.of(10, 5, 0), vel: V.of(-6, 0, 0), alive: true },
+    { id: 3, kind: 'proj', type: 'laser', owner: 0, pos: V.of(0, 0, 0), vel: V.of(0, 0, 0), alive: false },
+  ];
+  const god = View.buildGodScene(g);
+  const ships = god.primitives.filter((p) => p.type === 'ship');
+  const pts = god.primitives.filter((p) => p.type === 'point');
+  t.ok('god view shows both ships', ships.length === 2);
+  t.ok('god view ship 0 at TRUE pos', ships.some((p) => V.eq(p.pos, V.of(-20, 0, 0))));
+  t.ok('god view ship 1 at TRUE pos', ships.some((p) => V.eq(p.pos, V.of(20, 5, 0))));
+  t.ok('god view shows both players\' live projectiles', pts.some((p) => V.eq(p.pos, V.of(-10, 0, 0))) && pts.some((p) => V.eq(p.pos, V.of(10, 5, 0))));
+  t.ok('god view excludes dead projectiles', !pts.some((p) => V.eq(p.pos, V.of(0, 0, 0))));
+  t.ok('god view target is true midpoint', V.eq(god.target, V.of(0, 2.5, 0)));
+
+  // contrast: at turn 0 the plan view hides the enemy (light-lag), god view reveals it
+  const g2 = new Engine();
+  const planShips = View.buildPlanScene(g2, 0, { move: V.of(), weapon: 'none' }, {}).primitives.filter((p) => p.type === 'ship');
+  t.ok('plan view shows only own ship early', planShips.length === 1);
+  t.ok('god view reveals the enemy even before its light arrives', View.buildGodScene(g2).primitives.filter((p) => p.type === 'ship').length === 2);
+})();
+
 process.exit(t.report() ? 0 : 1);

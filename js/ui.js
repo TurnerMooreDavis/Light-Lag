@@ -23,7 +23,7 @@
 
   const UI = {
     game: null, renderer: null, player: 0, plan: null,
-    refs: {}, _animGen: 0,
+    refs: {}, _animGen: 0, godView: false,
   };
 
   UI.init = function (game, renderer) {
@@ -176,6 +176,7 @@
     ffRow.appendChild(ffNum); ffRow.appendChild(ffBtn);
     dSec.appendChild(ffRow);
     dSec.appendChild(el('div', { class: 'muted' }, ['advance N turns with both ships idle, 1 turn/sec']));
+    dSec.appendChild(this._godToggle());
     root.appendChild(dSec);
 
     // LOG
@@ -285,8 +286,34 @@
   };
 
   UI.refreshScene = function () {
-    const { primitives, target } = View.buildPlanScene(this.game, this.player, this.plan, { showSolution: this.plan.showSolution });
-    this.renderer.setScene(primitives, target);
+    if (this.godView) {
+      const s = View.buildGodScene(this.game);
+      this.renderer.setScene(s.primitives, s.target);
+      this._godLegend();
+    } else {
+      const s = View.buildPlanScene(this.game, this.player, this.plan, { showSolution: this.plan.showSolution });
+      this.renderer.setScene(s.primitives, s.target);
+      this.updateLegend(false);
+    }
+  };
+
+  UI._godLegend = function () {
+    this.refs.legend.innerHTML = '<b style="color:#ffd34e">GOD VIEW (debug)</b> — every object, true positions';
+    this.refs.hint.textContent = 'omniscient debug view · drag to orbit · scroll to zoom';
+  };
+
+  /* re-render whichever view is currently live (planning or fast-forward) */
+  UI._refreshActive = function () {
+    if (this._ffActive) this._renderFF(); else this.refreshScene();
+  };
+
+  /* a debug checkbox bound to UI.godView, reused in the console and the FF panel */
+  UI._godToggle = function () {
+    const lbl = el('label', { class: 'muted', style: 'display:flex;gap:6px;align-items:center;margin-top:6px;cursor:pointer;' }, []);
+    const cb = el('input', { type: 'checkbox' }); cb.checked = !!this.godView;
+    cb.addEventListener('change', () => { this.godView = cb.checked; this._refreshActive(); });
+    lbl.appendChild(cb); lbl.appendChild(document.createTextNode('👁 show all objects (god view · truth)'));
+    return lbl;
   };
 
   UI.renderLog = function () {
@@ -403,8 +430,15 @@
     this.refs.phase.textContent = 'FAST-FWD · ' + this._ffRemaining + ' left';
     this.refs.phase.className = 'phase resolve';
     if (this._ffStatus) this._ffStatus.textContent = `advancing… turn ${this.game.turn}, ${this._ffRemaining} remaining`;
-    const { primitives, target } = View.buildPlanScene(this.game, this.player, { move: V.of(), weapon: 'none', shield: 0 }, {});
-    this.renderer.setScene(primitives, target);
+    let s;
+    if (this.godView) {
+      s = View.buildGodScene(this.game);
+      this._godLegend();
+    } else {
+      s = View.buildPlanScene(this.game, this.player, { move: V.of(), weapon: 'none', shield: 0 }, {});
+      this.refs.legend.innerHTML = '<b style="color:var(--warn)">FAST-FORWARD</b> — your delayed sensors';
+    }
+    this.renderer.setScene(s.primitives, s.target);
   };
 
   UI._showFFPanel = function () {
@@ -413,6 +447,7 @@
     const sec = el('div', { class: 'sec' }, [el('h3', null, ['Fast-Forward (debug)'])]);
     this._ffStatus = el('div', { class: 'muted' }, ['advancing…']);
     sec.appendChild(this._ffStatus);
+    sec.appendChild(this._godToggle());
     const stop = el('button', { class: 'primary', style: 'width:100%;padding:10px;margin-top:8px;', onclick: () => { this._ffRemaining = 0; this._ffEnd(); } }, ['■ STOP']);
     sec.appendChild(stop);
     root.appendChild(sec);

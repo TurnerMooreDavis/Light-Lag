@@ -76,6 +76,21 @@ const { Runner, loadPage } = require('./harness');
   t.ok('renderer.draw (with gizmo) runs without error', !drawErr, drawErr && drawErr.stack);
   t.ok('plan scene contains no world-axis primitive', !LL.View.buildPlanScene(game, 0, { move: V.of(), weapon: 'none' }, {}).primitives.some((p) => p.type === 'axes'));
 
+  // ---------- GOD VIEW (debug: all objects, both players, truth) ----------
+  const godCheckbox = (root) => Array.from(doc.querySelectorAll((root || '#console') + ' label'))
+    .find((l) => /god view/i.test(l.textContent));
+  const shipCount = () => LL.renderer.scene.filter((p) => p.type === 'ship').length;
+  UI.refreshScene();
+  t.ok('plan view hides the enemy early (light-lag)', shipCount() === 1);
+  const gc = godCheckbox('#console');
+  t.ok('console has a god-view toggle', !!gc);
+  const gcb = gc.querySelector('input[type=checkbox]');
+  gcb.checked = true; gcb.dispatchEvent(new window.Event('change'));
+  t.ok('god view reveals BOTH ships at once (truth)', shipCount() === 2);
+  t.ok('UI.godView flag set', UI.godView === true);
+  gcb.checked = false; gcb.dispatchEvent(new window.Event('change'));
+  t.ok('toggling god view off restores the delayed view', shipCount() === 1 && UI.godView === false);
+
   // ---------- FAST-FORWARD (1 turn/sec, both idle), driven by fake timers ----------
   t.ok('on a planning screen before fast-forward', game.phase === 'plan');
   const a0 = V.clone(game.ships[0].pos), b0 = V.clone(game.ships[1].pos);
@@ -85,7 +100,14 @@ const { Runner, loadPage } = require('./harness');
   try {
     UI.fastForward(5);                       // does the 1st idle turn immediately, schedules the rest
     t.ok('fast-forward shows a STOP control', Array.from(doc.getElementById('console').querySelectorAll('button')).some((b) => /STOP/.test(b.textContent)));
+    // god view is usable WITH fast-forward (toggle it on from the FF panel)
+    const ffGod = godCheckbox('#console');
+    t.ok('fast-forward panel exposes the god-view toggle', !!ffGod);
+    const ffGcb = ffGod.querySelector('input[type=checkbox]');
+    ffGcb.checked = true; ffGcb.dispatchEvent(new window.Event('change'));
+    t.ok('god view during fast-forward shows both ships', LL.renderer.scene.filter((p) => p.type === 'ship').length === 2);
     for (let i = 0; i < 8 && fake.pending(); i++) fake.fire(1); // advance the 1s ticks
+    UI.godView = false;
   } catch (e) { ffErr = e; }
   t.ok('fast-forward runs without error', !ffErr, ffErr && ffErr.stack);
   t.ok('fast-forward advanced exactly 5 turns', game.turn === startTurn + 5, `turn ${startTurn} -> ${game.turn}`);

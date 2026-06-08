@@ -178,5 +178,28 @@
     return V.scale(V.add(game.ships[0].pos, game.ships[1].pos), 0.5);
   }
 
-  window.LL.View = { backdrop, buildPlanScene, buildReplayScene, midTarget, stars };
+  /* DEBUG god view — every in-game object from BOTH players at its TRUE current
+   * position (no light delay). Deliberately omniscient; for debugging only. */
+  function buildGodScene(game) {
+    const prim = backdrop(game.arenaRadius(), game.inOvertime());
+    game.ships.forEach((s, i) => {
+      prim.push({ type: 'ship', pos: s.pos, color: COL[i], size: 10, dropLine: true, ghost: !s.alive });
+      prim.push({ type: 'label', pos: s.pos, text: `P${i + 1} · HP ${s.hp.toFixed(0)} · ${V.fmt(s.pos, 0)}`, color: COL[i], dy: -16, bg: '#04070d' });
+    });
+    let live = 0;
+    for (const pr of game.projectiles) {
+      if (!pr.alive) continue;
+      live++;
+      const col = COL[pr.owner];
+      prim.push({ type: 'point', pos: pr.pos, color: col, r: 3 });
+      prim.push({ type: 'line', a: pr.pos, b: V.of(pr.pos.x, 0, pr.pos.z), color: col, width: 0.4, dash: [2, 4] });
+      const ud = V.normalize(pr.vel);
+      if (V.len2(ud) > 1e-9) prim.push({ type: 'arrow', a: pr.pos, b: V.add(pr.pos, V.scale(ud, 6)), color: col, width: 0.8 });
+      prim.push({ type: 'label', pos: pr.pos, text: `P${pr.owner + 1} ${pr.type}`, color: col, dy: -8, alpha: 0.85 });
+    }
+    prim.push({ type: 'label', pos: midTarget(game), text: `GOD VIEW · ${live} projectile${live === 1 ? '' : 's'} in flight`, color: '#ffd34e', dy: 0, alpha: 0.6 });
+    return { primitives: prim, target: midTarget(game) };
+  }
+
+  window.LL.View = { backdrop, buildPlanScene, buildReplayScene, buildGodScene, midTarget, stars };
 })();
