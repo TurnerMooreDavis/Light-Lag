@@ -548,10 +548,34 @@
     replay.addEventListener('click', () => this.playReplay());
     const again = el('button', { style: 'width:100%;padding:10px;margin-top:8px;' }, ['NEW BATTLE ↻']);
     again.addEventListener('click', () => this.newGame());
-    btns.appendChild(replay); btns.appendChild(again);
+    const dl = el('button', { style: 'width:100%;padding:10px;margin-top:8px;' }, ['⬇ DOWNLOAD GAME LOG']);
+    dl.addEventListener('click', () => this.downloadGameLog());
+    btns.appendChild(replay); btns.appendChild(again); btns.appendChild(dl);
     root.appendChild(btns);
-    root.appendChild(el('div', { class: 'sec muted' }, ['The whole duel is now declassified — watch where the ships truly were versus the light each side was fighting.']));
+    root.appendChild(el('div', { class: 'sec muted' }, ['Full game log saved — see the browser console (window.LL.lastGameLog) or download the JSON to share.']));
+
+    // stash + log the complete run so it can be inspected/shared
+    const log = g.exportLog({ mode: this.mode, aiType: this.mode === 'ai' ? this.aiType : null });
+    window.LL.lastGameLog = log;
+    try { console.log('[Light Lag] game log →', log); } catch (e) { /* ignore */ }
+
     this.playReplay(); // auto-roll the reveal once
+  };
+
+  UI.downloadGameLog = function () {
+    const log = window.LL.lastGameLog || this.game.exportLog({ mode: this.mode, aiType: this.mode === 'ai' ? this.aiType : null });
+    const json = JSON.stringify(log, null, 2);
+    try {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `lightlag-log-turn${log.outcome.turns}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (e) {
+      // environments without Blob/URL (or file://): fall back to the console
+      console.log('[Light Lag] game log (copy from here):\n' + json);
+    }
   };
 
   /* ---------- small builders ---------- */

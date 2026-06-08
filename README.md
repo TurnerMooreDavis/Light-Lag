@@ -54,7 +54,19 @@ so it plays by the exact same rules. AI personalities live in `js/ai.js` behind 
 small registry (`LL.AI.register(key, name, desc, decide)`); each appears in the
 menu automatically. The first one, **Hunter**, is deliberately basic — close in,
 fire on sight, shield when shot at — and is the template for future types
-(timid/runner, sniper, etc.).
+(timid/runner, sniper, etc.). A regression test runs Hunter against a player
+fleeing in 50 random straight-line directions and asserts it kills them every
+time (it wins because a straight-line runner gets pinned against the wall and
+the overtime arena closes in — at equal top speed it can't be out-run forever).
+
+## Game logs
+
+Every match records a complete, JSON-serializable log. On the game-over screen,
+**Download Game Log** saves it; it's also `console.log`ged and stashed at
+`window.LL.lastGameLog`, and `game.exportLog()` is callable anytime. Each entry
+has the config, both ships' start, the outcome, and per turn: both players'
+orders (`accel`/`weapon`/`aim`/`shield`), the end-of-turn truth `state`
+(`pos`/`vel`/`hp`), plus `spawns`/`hits`/`destroyed`.
 
 ## How to play (hotseat)
 

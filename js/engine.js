@@ -172,6 +172,12 @@
 
     // Authoritative rules layer: never trust the UI to have enforced the budget.
     this.plans = this.plans.map((p) => this._enforceBudget(p || {}));
+    // record the (sanitized) orders both players issued this turn, for the game log
+    report.plans = this.plans.map((p) => ({
+      accel: V.clone(p.accel || V.of()), weapon: p.weapon || 'none',
+      aim: p.aim ? V.clone(p.aim) : null, shield: p.shield || 0,
+      shieldDir: p.shieldDir ? V.clone(p.shieldDir) : null,
+    }));
 
     // snapshot pre-move ship positions (for swept collision this tick)
     const s0 = this.ships.map((s) => V.clone(s.pos));
@@ -272,9 +278,33 @@
       this.phase = 'plan';
       this.planningPlayer = 0;
     }
+    // end-of-turn truth snapshot of both ships (for the game log)
+    report.state = this.ships.map((s) => ({ pos: V.clone(s.pos), vel: V.clone(s.vel), hp: s.hp, alive: s.alive }));
     this.lastReport = report;
     this.reports.push(report);
     return report;
+  };
+
+  /* A complete, JSON-serializable record of the game so far: config, per-turn
+   * orders + resulting truth state + events, and the outcome. Used by the UI to
+   * download/console a real playthrough, and by tests/debugging. */
+  Game.prototype.exportLog = function (meta) {
+    const C = CONFIG;
+    return {
+      meta: Object.assign({ savedAtTurn: this.turn }, meta || {}),
+      config: {
+        c: C.c, startDistance: C.startDistance, maxAccel: C.maxAccel, maxSpeed: C.maxSpeed,
+        accelCost: C.accelCost, energyPerTurn: C.energyPerTurn, startHP: C.startHP, hitRadius: C.hitRadius,
+        arenaRadius0: C.arenaRadius0, arenaRadiusMin: C.arenaRadiusMin, normalTurnCap: C.normalTurnCap,
+        hardTurnCap: C.hardTurnCap, weapons: C.weapons, shield: C.shield,
+      },
+      start: this.ships.map((s) => ({ pos: V.clone(s.history[0].pos) })),
+      outcome: { winner: this.winner, endReason: this.endReason, turns: this.turn },
+      turns: this.reports.map((r) => ({
+        turn: r.to, plans: r.plans, state: r.state,
+        spawns: r.spawns, hits: r.hits, destroyed: r.destroyed,
+      })),
+    };
   };
 
   /* Sanitize a plan against the hard rules the engine OWNS (never trusts the UI):

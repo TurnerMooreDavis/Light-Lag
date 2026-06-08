@@ -150,6 +150,14 @@ const { Runner, loadPage } = require('./harness');
   t.ok('vs-ai reached a conclusion', game.phase === 'gameover');
   t.ok('the AI engaged — damage was dealt', game.ships[0].hp < CONFIG.startHP || game.ships[1].hp < CONFIG.startHP);
 
+  // ---------- game log: captured for inspection / sharing ----------
+  t.ok('game-over offers a download-log button', Array.from(doc.querySelectorAll('#console button')).some((b) => /DOWNLOAD GAME LOG/i.test(b.textContent)));
+  t.ok('full game log stashed on window after the match', !!(window.LL.lastGameLog && Array.isArray(window.LL.lastGameLog.turns) && window.LL.lastGameLog.turns.length === game.turn));
+  t.ok('game log records the outcome', !!window.LL.lastGameLog.outcome && window.LL.lastGameLog.outcome.winner === game.winner);
+  t.ok('game log records each turn\'s orders + state', window.LL.lastGameLog.turns[0].plans.length === 2 && window.LL.lastGameLog.turns[0].state.length === 2);
+  let dlErr = null; try { UI.downloadGameLog(); } catch (e) { dlErr = e; }
+  t.ok('downloadGameLog runs without throwing', !dlErr, dlErr && dlErr.stack);
+
   t.ok('no uncaught window errors during e2e', errors.length === 0, errors.join(' | '));
   process.exit(t.report() ? 0 : 1);
 })();

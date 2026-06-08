@@ -402,4 +402,46 @@ const t = new Runner('unit');
   t.ok('god view (debug) does reflect the true/poisoned state', View.buildGodScene(g).primitives.some((p) => p.type === 'ship' && p.pos.x > 9000));
 })();
 
+/* ===================== AI: a straight-line runner is eventually killed (50 random directions) ===================== */
+(() => {
+  const mulberry32 = (a) => () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let x = Math.imul(a ^ (a >>> 15), 1 | a); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+  const rnd = mulberry32(0x1234abcd);
+  const randDir = () => { let x, y, z, l; do { x = rnd() * 2 - 1; y = rnd() * 2 - 1; z = rnd() * 2 - 1; l = x * x + y * y + z * z; } while (l < 1e-4 || l > 1); l = Math.sqrt(l); return V.of(x / l, y / l, z / l); };
+
+  const RUNS = 50;
+  let aiWins = 0, kills = 0, maxTurn = 0, worst = null;
+  for (let run = 0; run < RUNS; run++) {
+    const g = new Engine(); const dir = randDir(); let guard = 0;
+    while (g.phase !== 'gameover' && guard++ < 250) {
+      g.submitPlan(0, { accel: V.scale(dir, CONFIG.maxAccel), weapon: 'none', shield: 0 }); // player flees straight, never fights
+      g.submitPlan(1, LL.AI.decide('hunter', g.viewFor(1)));                                 // Hunter pursues
+      g.resolve();
+    }
+    if (g.winner === 1) aiWins++;
+    if (g.winner === 1 && g.endReason === 'destroyed') kills++;
+    maxTurn = Math.max(maxTurn, g.turn);
+    if (g.winner !== 1 && !worst) worst = { dir, winner: g.winner, reason: g.endReason, turns: g.turn };
+  }
+  t.ok(`AI beats a straight-line runner in all ${RUNS} random directions`, aiWins === RUNS, worst ? JSON.stringify(worst) : '');
+  t.ok(`AI actually DESTROYS the runner in all ${RUNS} runs`, kills === RUNS, 'kills=' + kills + '/' + RUNS);
+  t.ok('every run resolves within the hard turn cap', maxTurn <= CONFIG.hardTurnCap, 'maxTurn=' + maxTurn);
+})();
+
+/* ===================== game log: complete, serializable record of a run ===================== */
+(() => {
+  const g = new Engine();
+  g.ships[0].pos = V.of(0, 0, 0); g.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }];
+  g.ships[1].pos = V.of(10, 0, 0); g.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }];
+  g.submitPlan(0, { accel: V.of(1, 0, 0), weapon: 'laser', aim: V.of(10, 0, 0) });
+  g.submitPlan(1, { accel: V.of(), weapon: 'none', shield: 3, shieldDir: V.of(0, 0, 0) });
+  g.resolve(); g.idleTurn();
+  const log = g.exportLog({ mode: 'ai', aiType: 'hunter' });
+  t.ok('log has config + outcome + turns[]', !!log.config && !!log.outcome && Array.isArray(log.turns));
+  t.ok('log turn count matches turns played', log.turns.length === g.turn);
+  t.ok('log records both players\' orders per turn', log.turns[0].plans.length === 2 && log.turns[0].plans[0].weapon === 'laser');
+  t.ok('log records end-of-turn state (pos/vel/hp)', log.turns[0].state.length === 2 && 'hp' in log.turns[0].state[0] && 'vel' in log.turns[0].state[0]);
+  t.ok('log carries meta (mode/aiType)', log.meta.mode === 'ai' && log.meta.aiType === 'hunter');
+  t.ok('log is JSON-serializable', typeof JSON.stringify(log) === 'string');
+})();
+
 process.exit(t.report() ? 0 : 1);
