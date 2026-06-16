@@ -127,6 +127,7 @@
       case 'arrow': return this._arrow(p);
       case 'point': return this._point(p);
       case 'ship': return this._ship(p);
+      case 'stargate': return this._stargate(p);
       case 'bubble': return this._bubble(p);
       case 'burst': return this._burst(p);
       case 'label': return this._label(p);
@@ -196,6 +197,32 @@
       this._seg(p.pos, foot, p.color, 0.5, [2, 4]);
       const pf = this.proj(foot);
       if (pf.visible) { ctx.save(); ctx.fillStyle = p.color; ctx.globalAlpha = 0.4; ctx.beginPath(); ctx.arc(pf.x, pf.y, 2, 0, 7); ctx.fill(); ctx.restore(); }
+    }
+  };
+
+  /* Stargate: a ring lying in the plane it faces, with a stub showing the launch
+   * direction. Static landmark — drawn in world space so it tilts with the camera. */
+  Renderer.prototype._stargate = function (p) {
+    const n = V.len2(p.dir || V.of()) > 1e-9 ? V.normalize(p.dir) : V.of(0, 1, 0);
+    // two basis vectors spanning the ring's plane (perpendicular to the facing axis)
+    const seed = Math.abs(n.y) < 0.9 ? V.of(0, 1, 0) : V.of(1, 0, 0);
+    const u = V.normalize(V.cross(n, seed));
+    const w = V.normalize(V.cross(n, u));
+    const R = p.radius || 7, seg = 28;
+    let prev = null;
+    for (let i = 0; i <= seg; i++) {
+      const a = (2 * Math.PI * i) / seg;
+      const pt = V.add(p.pos, V.add(V.scale(u, R * Math.cos(a)), V.scale(w, R * Math.sin(a))));
+      if (prev) this._seg(prev, pt, p.color, p.width || 1.5);
+      prev = pt;
+    }
+    // launch-direction stub + bright hub so the gate reads as a portal, not a bubble
+    this._arrow({ a: p.pos, b: V.add(p.pos, V.scale(n, R * 1.6)), color: p.color, width: 1 });
+    const pr = this.proj(p.pos);
+    if (pr.visible) {
+      const ctx = this.ctx; ctx.save();
+      ctx.fillStyle = p.color; ctx.shadowColor = p.color; ctx.shadowBlur = 8; ctx.globalAlpha = 0.9;
+      ctx.beginPath(); ctx.arc(pr.x, pr.y, 2.5, 0, 7); ctx.fill(); ctx.restore();
     }
   };
 

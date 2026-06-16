@@ -7,7 +7,10 @@
 
   const CONFIG = {
     c: 10,                 // speed of light, grid-units per turn (THE load-bearing constant)
-    startDistance: 100,    // ships begin AT LEAST this far apart (randomized) => >=10-turn blackout
+    startDistance: 50,     // ships begin EXACTLY this far apart (orientation randomized). At
+                           // spawnBoost each (closing 10/turn), a passive pair collides on turn 5.
+    spawnBoost: 5,         // initial speed each stargate imparts (ships launch toward each other)
+    shipCollideRadius: 6,  // two ships destroy each other if their swept paths pass this close
     // shrinking arena (a sphere, ships clamped inside). Overtime forces engagement.
     arenaRadius0: 160,     // starting boundary radius
     arenaRadiusMin: 18,    // walls stop closing here
@@ -36,24 +39,34 @@
     const z = 2 * rng() - 1, t = 2 * Math.PI * rng(), s = Math.sqrt(Math.max(0, 1 - z * z));
     return V.of(s * Math.cos(t), s * Math.sin(t), z);
   }
-  // Randomized start positions: a random orientation + separation (>= startDistance)
-  // about a random midpoint, with both ships kept comfortably inside the arena.
-  // Shifting BOTH ships by the same midpoint offset preserves their separation, so
-  // the >= startDistance guarantee holds exactly without rejection sampling.
-  function randomStarts(rng) {
+  // A facing pair of stargates from two spawn points: each gate sits at a spawn
+  // point and faces along the axis toward the other (so they look at each other,
+  // and ships launch toward the centre). Used for both random and explicit starts.
+  function stargatesFrom(starts) {
+    const axis = V.normalize(V.sub(starts[1], starts[0])); // from gate 0 toward gate 1
+    return [
+      { owner: 0, pos: V.clone(starts[0]), facing: V.clone(axis) },
+      { owner: 1, pos: V.clone(starts[1]), facing: V.neg(axis) },
+    ];
+  }
+  // Randomized stargate placement: a random orientation about a random midpoint,
+  // with both gates kept comfortably inside the arena. The separation is FIXED at
+  // exactly startDistance so a passive pair (launched at spawnBoost, closing
+  // 10/turn) always collides on turn 5 — only the orientation/midpoint vary.
+  // Shifting BOTH gates by the same midpoint offset preserves their separation.
+  function randomStargates(rng) {
     const r = rng || Math.random;
     const dir = randomDir(r);
-    const sep = CONFIG.startDistance + r() * 40;          // 100..140 units apart
-    const half = sep / 2;
+    const half = CONFIG.startDistance / 2;                // fixed gap => deterministic turn-5 collision
     const maxOff = Math.max(0, CONFIG.arenaRadius0 - 12 - half); // keep both inside the wall
     const off = V.scale(randomDir(r), r() * maxOff);
-    return [V.add(off, V.scale(dir, -half)), V.add(off, V.scale(dir, half))];
+    return stargatesFrom([V.add(off, V.scale(dir, -half)), V.add(off, V.scale(dir, half))]);
   }
 
-  function makeShip(owner, pos) {
+  function makeShip(owner, pos, vel) {
     return {
       id: nextId(), kind: 'ship', owner,
-      pos: V.clone(pos), vel: V.of(), hp: CONFIG.startHP, alive: true,
+      pos: V.clone(pos), vel: V.clone(vel || V.of()), hp: CONFIG.startHP, alive: true,
       damageDealt: 0,
       history: [{ t: 0, pos: V.clone(pos) }],
       shield: { strength: 0, dir: V.of(0, 0, 0) }, // active during the resolving tick
@@ -63,17 +76,20 @@
   function Game(opts) { this.reset(opts); }
 
   // opts.starts = [posA, posB] forces positions (tests); opts.rng = ()->[0,1)
-  // seeds the random placement. Default: randomized starts >= startDistance apart.
+  // seeds the random placement. Default: randomized stargates >= startDistance apart.
   Game.prototype.reset = function (opts) {
     opts = opts || {};
     _pid = 1;
     this.cfg = CONFIG;
     this.turn = 0;
-    const starts = opts.starts || randomStarts(opts.rng);
-    this.ships = [
-      makeShip(0, starts[0]),
-      makeShip(1, starts[1]),
-    ];
+    // Each ship launches from a stargate. The two gates face each other and are
+    // static, universally-visible landmarks (see viewFor) — they reveal where each
+    // ship STARTED, never where it is now (the enemy ship stays light-delayed).
+    // Randomized games give each ship a spawnBoost launch velocity toward the
+    // centre; explicit opts.starts spawn AT REST for deterministic tests.
+    this.stargates = opts.starts ? stargatesFrom(opts.starts) : randomStargates(opts.rng);
+    const boost = opts.starts ? 0 : CONFIG.spawnBoost;
+    this.ships = this.stargates.map((g) => makeShip(g.owner, g.pos, V.scale(g.facing, boost)));
     this.projectiles = [];
     this.plans = [null, null];
     this.phase = 'plan';       // 'plan' | 'resolve' | 'gameover'
@@ -182,6 +198,7 @@
       me: this.ships[viewer],                          // your own ship — your true state is yours to know
       enemy: this.observeEnemy(viewer),                // light-delayed image ONLY (blind => no position)
       projectiles: this.observeProjectiles(viewer),    // own true; enemy delayed
+      stargates: this.stargates,                       // static launch points: public, fixed, never move
     };
   };
 
@@ -229,6 +246,21 @@
       report.moves.push({ owner: i, from: s0[i], to: V.clone(np) });
     });
     const s1 = this.ships.map((s) => V.clone(s.pos));
+
+    // 1b) ship-ship collision: if the two hulls' swept paths pass within
+    // shipCollideRadius this tick, BOTH ships are destroyed (a head-on or grazing
+    // ram). Swept (not just endpoint) so fast ships can't tunnel through each other.
+    if (this.ships[0].alive && this.ships[1].alive) {
+      const ca = V.closestApproach(s0[0], s1[0], s0[1], s1[1]);
+      if (ca.dist <= CONFIG.shipCollideRadius) {
+        const point = V.scale(V.add(V.lerp(s0[0], s1[0], ca.t), V.lerp(s0[1], s1[1], ca.t)), 0.5);
+        this.ships.forEach((s) => { s.hp = 0; }); // step 4 marks both destroyed
+        report.collision = { point, t: ca.t };
+        // a collision is a local event both ships feel at once (no light delay)
+        this._log(0, 'COLLISION — both ships destroyed', 'hit');
+        this._log(1, 'COLLISION — both ships destroyed', 'hit');
+      }
+    }
 
     // 2) move existing projectiles + swept collision vs enemy ship
     const survivors = [];
@@ -291,6 +323,7 @@
     if (dead.length) {
       const alive = this.ships.filter((s) => s.alive);
       if (alive.length === 1) { this.winner = alive[0].owner; this.endReason = 'destroyed'; }
+      else if (report.collision) { this.winner = 'draw'; this.endReason = 'collision'; }
       else { this.winner = this._tiebreak(); this.endReason = 'mutual destruction'; }
       this.phase = 'gameover';
     } else if (this.turn >= CONFIG.hardTurnCap) {
@@ -320,10 +353,12 @@
         hardTurnCap: C.hardTurnCap, weapons: C.weapons, shield: C.shield,
       },
       start: this.ships.map((s) => ({ pos: V.clone(s.history[0].pos) })),
+      stargates: this.stargates.map((g) => ({ owner: g.owner, pos: V.clone(g.pos), facing: V.clone(g.facing) })),
       outcome: { winner: this.winner, endReason: this.endReason, turns: this.turn },
       turns: this.reports.map((r) => ({
         turn: r.to, plans: r.plans, state: r.state,
         spawns: r.spawns, hits: r.hits, destroyed: r.destroyed,
+        collision: r.collision || null,
       })),
     };
   };

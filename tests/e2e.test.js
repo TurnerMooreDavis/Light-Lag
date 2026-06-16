@@ -116,7 +116,12 @@ const { Runner, loadPage } = require('./harness');
   t.ok('renderer.draw (with gizmo) runs in god mode', !drawErr, drawErr && drawErr.stack);
 
   // ---------- FAST-FORWARD inside god mode: each turn's resolution is ANIMATED (rAF) ----------
+  // pin a non-colliding pair coasting gently OUTWARD so the idle fast-forward stays a
+  // pure coast (no thrust, no ship-ship collision) over its 5 turns.
+  game.ships[0].pos = V.of(-40, 0, 0); game.ships[0].history = [{ t: 0, pos: V.of(-40, 0, 0) }]; game.ships[0].vel = V.of(-2, 1, 0);
+  game.ships[1].pos = V.of(40, 0, 0); game.ships[1].history = [{ t: 0, pos: V.of(40, 0, 0) }]; game.ships[1].vel = V.of(2, -1, 0);
   const a0 = V.clone(game.ships[0].pos), b0 = V.clone(game.ships[1].pos), startTurn = game.turn;
+  const v0 = [V.clone(game.ships[0].vel), V.clone(game.ships[1].vel)]; // coast velocities
   const ffNum = doc.querySelector('#console input[type=number]');
   const ffBtn = Array.from(doc.querySelectorAll('#console button')).find((b) => /FAST-FORWARD/.test(b.textContent));
   ffNum.value = '5';
@@ -131,7 +136,12 @@ const { Runner, loadPage } = require('./harness');
   } catch (e) { ffErr = e; }
   t.ok('fast-forward runs without error', !ffErr, ffErr && ffErr.stack);
   t.ok('fast-forward advanced exactly 5 turns', game.turn === startTurn + 5, `turn ${startTurn} -> ${game.turn}`);
-  t.ok('both ships stayed idle during fast-forward', V.eq(game.ships[0].pos, a0, 1e-9) && V.eq(game.ships[1].pos, b0, 1e-9));
+  // "idle" now means no thrust — ships still COAST on their current velocity, so
+  // velocity is unchanged and position advances by 5 turns of coasting.
+  t.ok('both ships coasted on their velocity during fast-forward (no thrust applied)',
+    V.eq(game.ships[0].vel, v0[0], 1e-9) && V.eq(game.ships[1].vel, v0[1], 1e-9) &&
+    V.eq(game.ships[0].pos, V.add(a0, V.scale(v0[0], 5)), 1e-6) &&
+    V.eq(game.ships[1].pos, V.add(b0, V.scale(v0[1], 5)), 1e-6));
   t.ok('still in god mode after fast-forward', UI._godMode === true);
   t.ok('god-mode panel restored after fast-forward', /FAST-FORWARD/.test(consoleText()) && /EXIT GOD MODE/i.test(consoleText()));
 

@@ -83,16 +83,21 @@ const t = new Runner('unit');
 /* ===================== engine: setup, budget, resolution ===================== */
 (() => {
   const g = new Engine();
-  // starts are RANDOMIZED each game: at least startDistance apart, both inside the arena
-  let minSep = Infinity, maxSep = 0, allInside = true;
+  // starts are RANDOMIZED in orientation/midpoint, but the gap is FIXED at exactly
+  // startDistance (so a passive pair always collides on turn 5). Both stay inside.
+  let minSep = Infinity, maxSep = 0, allInside = true, posVaries = false;
+  const firstPos = V.clone(new Engine().ships[0].pos);
   for (let i = 0; i < 200; i++) {
     const gg = new Engine();
     const d = V.dist(gg.ships[0].pos, gg.ships[1].pos);
     minSep = Math.min(minSep, d); maxSep = Math.max(maxSep, d);
+    if (V.dist(gg.ships[0].pos, firstPos) > 1e-6) posVaries = true;
     if (V.len(gg.ships[0].pos) > CONFIG.arenaRadius0 || V.len(gg.ships[1].pos) > CONFIG.arenaRadius0) allInside = false;
   }
-  t.ok('randomized starts are always >= startDistance apart', minSep >= CONFIG.startDistance - 1e-9, 'minSep=' + minSep.toFixed(2));
-  t.ok('randomized starts actually vary (not a fixed pair)', maxSep - minSep > 1e-6);
+  t.ok('randomized starts are always EXACTLY startDistance apart (fixed gap)',
+    Math.abs(minSep - CONFIG.startDistance) < 1e-6 && Math.abs(maxSep - CONFIG.startDistance) < 1e-6,
+    `minSep=${minSep.toFixed(3)} maxSep=${maxSep.toFixed(3)}`);
+  t.ok('start positions/orientation still vary across games', posVaries);
   t.ok('randomized starts stay inside the arena', allInside);
   t.ok('explicit starts override randomization (deterministic tests)',
     V.eq(new Engine({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] }).ships[0].pos, V.of(-50, 0, 0)));
@@ -119,9 +124,76 @@ const t = new Runner('unit');
   t.ok('turn 1: P2 blind to enemy', !g2.observeEnemy(1).visible);
 })();
 
+/* ===================== engine: stargates (spawn points + launch boost) ===================== */
+(() => {
+  // RANDOMIZED game: ships spawn AT their stargate and get a launch boost toward
+  // the centre. (Explicit opts.starts spawn at rest — tested separately below.)
+  const g = new Engine();
+  const axis = V.normalize(V.sub(g.stargates[1].pos, g.stargates[0].pos));
+
+  t.ok('two stargates exist', g.stargates.length === 2);
+  t.ok('each ship spawns exactly at its stargate', V.eq(g.stargates[0].pos, g.ships[0].pos) && V.eq(g.stargates[1].pos, g.ships[1].pos));
+  t.ok('stargates face each other', V.eq(g.stargates[0].facing, axis, 1e-9) && V.eq(g.stargates[1].facing, V.neg(axis), 1e-9));
+  t.approx('stargate 0 imparts the spawn boost', V.len(g.ships[0].vel), CONFIG.spawnBoost);
+  t.approx('stargate 1 imparts the spawn boost', V.len(g.ships[1].vel), CONFIG.spawnBoost);
+  t.ok('ships launch along their gate facing (toward each other)',
+    V.eq(V.normalize(g.ships[0].vel), axis, 1e-9) && V.eq(V.normalize(g.ships[1].vel), V.neg(axis), 1e-9));
+
+  // stargates are static: positions never change as the game resolves
+  const gp0 = V.clone(g.stargates[0].pos), gp1 = V.clone(g.stargates[1].pos);
+  for (let i = 0; i < 8; i++) g.idleTurn();
+  t.ok('stargates never move', V.eq(g.stargates[0].pos, gp0) && V.eq(g.stargates[1].pos, gp1));
+
+  // stargates are PUBLIC: both players see both gates from turn 0 (unlike the enemy ship)
+  const g2 = new Engine({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] });
+  const v0 = g2.viewFor(0), v1 = g2.viewFor(1);
+  t.ok('viewFor exposes both stargates to player 0', v0.stargates && v0.stargates.length === 2);
+  t.ok('viewFor exposes both stargates to player 1', v1.stargates && v1.stargates.length === 2);
+  t.ok('both players see the SAME public stargate positions',
+    V.eq(v0.stargates[0].pos, v1.stargates[0].pos) && V.eq(v0.stargates[1].pos, v1.stargates[1].pos));
+  t.ok('stargates are public even while the enemy ship is still blind (turn 0)', !g2.observeEnemy(0).visible);
+
+  // explicit starts spawn AT REST (deterministic tests) but still build facing stargates
+  t.ok('explicit opts.starts spawn at rest', V.eq(g2.ships[0].vel, V.of()) && V.eq(g2.ships[1].vel, V.of()));
+  t.ok('explicit starts still get a facing stargate pair',
+    V.eq(g2.stargates[0].facing, V.of(1, 0, 0), 1e-9) && V.eq(g2.stargates[1].facing, V.of(-1, 0, 0), 1e-9));
+})();
+
+/* ===================== engine: ship-ship collision (mutual destruction) ===================== */
+(() => {
+  // a passive pair launched at spawnBoost (closing 10/turn) from the minimum
+  // separation (50 apart) rams head-on and destroys both ships on turn 5.
+  const g = new Engine({ starts: [V.of(-25, 0, 0), V.of(25, 0, 0)] });
+  g.ships[0].vel = V.of(CONFIG.spawnBoost, 0, 0);   // launch toward the centre (as a real spawn would)
+  g.ships[1].vel = V.of(-CONFIG.spawnBoost, 0, 0);
+  let collideTurn = null;
+  for (let i = 0; i < 8 && g.phase !== 'gameover'; i++) { if (g.idleTurn().collision && collideTurn === null) collideTurn = g.turn; }
+  t.ok('passive boosted pair (50u apart) collides on turn 5', collideTurn === 5, 'collideTurn=' + collideTurn);
+  t.ok('a collision destroys BOTH ships', !g.ships[0].alive && !g.ships[1].alive && g.ships[0].hp === 0 && g.ships[1].hp === 0);
+  t.ok('a collision ends the game as a collision-draw', g.phase === 'gameover' && g.winner === 'draw' && g.endReason === 'collision');
+
+  // swept detection: two ships that CROSS within shipCollideRadius in a single tick
+  // collide even though neither endpoint sits on top of the other (no tunneling).
+  const gc = new Engine({ starts: [V.of(-5, 0, 0), V.of(5, 0, 0)] });
+  gc.ships[0].vel = V.of(CONFIG.maxSpeed, 0, 0); gc.ships[1].vel = V.of(-CONFIG.maxSpeed, 0, 0); // pass through each other
+  const rc = gc.idleTurn();
+  t.ok('swept collision catches a single-tick crossing', !!rc.collision && !gc.ships[0].alive && !gc.ships[1].alive);
+
+  // ships that stay farther apart than the collide radius do NOT collide
+  const gp = new Engine({ starts: [V.of(-20, 0, 0), V.of(-20, 20, 0)] });
+  gp.ships[0].vel = V.of(0, 0, 3); gp.ships[1].vel = V.of(0, 0, 3); // parallel, 20u apart forever
+  let touched = false;
+  for (let i = 0; i < 5; i++) { if (gp.idleTurn().collision) touched = true; }
+  t.ok('well-separated ships never collide', !touched && gp.ships[0].alive && gp.ships[1].alive);
+
+  // the collision point is recorded (so replay/log can show the impact)
+  t.ok('collision report carries an impact point', g.reports.some((r) => r.collision && r.collision.point));
+})();
+
 /* ===================== engine: idle turn / first contact (fast-forward core) ===================== */
 (() => {
   // explicit 100u start so the light-front timing (first contact at turn 10) is exact
+  // (explicit starts spawn AT REST, so the ships sit still through the blackout)
   const g = new Engine({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] });
   let firstSeen = null, movedWhileIdle = false;
   const startA = V.clone(g.ships[0].pos), startB = V.clone(g.ships[1].pos);
@@ -140,7 +212,9 @@ const t = new Runner('unit');
 
 /* ===================== engine: inertia (acceleration movement model) ===================== */
 (() => {
-  const fresh = () => { const g = new Engine(); g.ships[0].pos = V.of(0, 0, 0); g.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }]; return g; };
+  // park ship 0 at the origin AT REST (the stargate launch velocity is irrelevant
+  // to these pure-physics checks; zero it so "from rest" assertions hold).
+  const fresh = () => { const g = new Engine(); g.ships[0].pos = V.of(0, 0, 0); g.ships[0].vel = V.of(); g.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }]; return g; };
 
   // from rest, one turn of thrust a sets velocity a and moves by a
   const g = fresh();
@@ -179,8 +253,12 @@ const t = new Runner('unit');
 
 /* ===================== engine: combat, shields, overkill, tiebreak ===================== */
 (() => {
+  // these checks pin ship positions to test combat geometry; zero the stargate
+  // launch velocity so the targets stay put where each test places them.
+  const atRest = (gg) => { gg.ships.forEach((s) => { s.vel = V.of(); }); return gg; };
+
   // laser eventually hits a near, stationary target and deals damage credited to firer
-  const g = new Engine();
+  const g = atRest(new Engine());
   g.ships[0].pos = V.of(0, 0, 0); g.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }];
   g.ships[1].pos = V.of(10, 0, 0); g.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }];
   let hit = false;
@@ -194,7 +272,7 @@ const t = new Runner('unit');
   t.ok('damage credited to firer', g.ships[0].damageDealt > 0);
 
   // shield direction is anchored at the POST-move position (not pre-move)
-  const gs = new Engine();
+  const gs = atRest(new Engine());
   gs.ships[1].pos = V.of(0, 0, 0); gs.ships[1].history = [{ t: 0, pos: V.of(0, 0, 0) }];
   gs.submitPlan(0, { accel: V.of(), weapon: 'none' });
   gs.submitPlan(1, { accel: V.of(3, 0, 0), weapon: 'none', shield: 2, shieldDir: V.of(0, 10, 0) });
@@ -204,7 +282,7 @@ const t = new Runner('unit');
 
   // shield blocks a shot from the faced cone, but not from behind
   const blockTest = (faceX) => {
-    const gg = new Engine();
+    const gg = atRest(new Engine());
     gg.ships[0].pos = V.of(0, 0, 0); gg.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }];
     gg.ships[1].pos = V.of(10, 0, 0); gg.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }];
     let blocked = 0, dealt = 0;
@@ -221,7 +299,7 @@ const t = new Runner('unit');
   t.ok('shield facing away blocks nothing', blockTest(100).blocked === 0);       // face +x (away)
 
   // overkill: two lasers landing the same tick cannot double-credit / multi-log the kill
-  const go = new Engine();
+  const go = atRest(new Engine());
   go.ships[0].pos = V.of(0, 0, 0); go.ships[0].history = [{ t: 0, pos: V.of(0, 0, 0) }];
   go.ships[1].pos = V.of(10, 0, 0); go.ships[1].history = [{ t: 0, pos: V.of(10, 0, 0) }]; go.ships[1].hp = 10;
   const laser = () => ({ id: 1, kind: 'proj', type: 'laser', owner: 0, pos: V.of(0, 0, 0), vel: V.of(10, 0, 0), history: [{ t: 0, pos: V.of(0, 0, 0) }], spawnT: 0, life: 50, damage: 45, splash: 0, alive: true });
@@ -233,7 +311,7 @@ const t = new Runner('unit');
   t.ok('overkill not double-credited', go.ships[0].damageDealt <= 45 + 1e-6);
 
   // torpedo splash deals falloff (a near miss still detonates for partial damage)
-  const gt = new Engine();
+  const gt = atRest(new Engine());
   gt.ships[1].pos = V.of(0, 0, 0); gt.ships[1].history = [{ t: 0, pos: V.of(0, 0, 0) }];
   const w = CONFIG.weapons.torpedo;
   gt.projectiles = [{ id: 2, kind: 'proj', type: 'torpedo', owner: 0, pos: V.of(-w.speed, w.splash - 1, 0), vel: V.of(w.speed, 0, 0), history: [{ t: 0, pos: V.of(-w.speed, w.splash - 1, 0) }], spawnT: 0, life: w.life, damage: w.damage, splash: w.splash, alive: true }];
@@ -245,7 +323,10 @@ const t = new Runner('unit');
 
 /* ===================== engine: overtime + termination + per-viewer log ===================== */
 (() => {
-  const g = new Engine();
+  // explicit (at-rest) starts so the passive pair never coasts into a collision and
+  // instead runs all the way to the hard turn cap; the shrinking wall keeps them
+  // ~2·arenaRadiusMin apart (well outside shipCollideRadius), so it stays a draw.
+  const g = new Engine({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] });
   t.ok('arena full size pre-overtime', g.arenaRadiusAt(CONFIG.normalTurnCap) === CONFIG.arenaRadius0);
   t.ok('arena shrinks in overtime', g.arenaRadiusAt(CONFIG.normalTurnCap + 10) < CONFIG.arenaRadius0);
   t.ok('arena clamps to minimum', g.arenaRadiusAt(1e9) === CONFIG.arenaRadiusMin);
@@ -285,15 +366,19 @@ const t = new Runner('unit');
   t.ok('backdrop has NO world axes (removed)', !bd.some((p) => p.type === 'axes'));
   t.ok('backdrop has grid + sphere + starfield', ['grid', 'sphere', 'starfield'].every((tp) => bd.some((p) => p.type === tp)));
 
-  // before contact: NO SIGNAL label, no enemy ghost ship, and NO enemy-position hint
+  // before contact: NO SIGNAL label, no enemy ghost ship. Stargates ARE public
+  // landmarks (drawn from turn 0), but nothing tracks the enemy's CURRENT position.
   const early = View.buildPlanScene(g, 0, { accel: V.of(), weapon: 'none' }, {});
   t.ok('pre-contact shows NO SIGNAL', early.primitives.some((p) => p.type === 'label' && /NO SIGNAL/.test(p.text)));
   t.ok('pre-contact draws no enemy ghost ship', !early.primitives.some((p) => p.type === 'ship' && p.ghost));
-  // the only non-own primitives pre-contact are the backdrop + own-ship markers: nothing
-  // is drawn anywhere near the (hidden) enemy start position.
+  // both stargates are public landmarks shown from turn 0
+  t.ok('both stargates drawn from turn 0', early.primitives.filter((p) => p.type === 'stargate').length === 2);
+  // the enemy stargate sits at the enemy start (public), but the ONLY primitives near
+  // the enemy start are that static gate + its label — nothing tracks the live enemy.
   const enemyStart = g.ships[1].pos;
-  t.ok('pre-contact draws nothing at/near the hidden enemy position',
-    !early.primitives.some((p) => p.pos && V.dist(p.pos, enemyStart) < CONFIG.maxSpeed));
+  t.ok('pre-contact: only the static stargate marks the enemy start (no live tracking)',
+    early.primitives.filter((p) => p.pos && V.dist(p.pos, enemyStart) < CONFIG.maxSpeed)
+      .every((p) => p.type === 'stargate' || p.type === 'label'));
   t.ok('pre-contact camera frames own ship only (no enemy guess)', V.eq(early.target, g.ships[0].pos));
 
   // camera framing must use the APPARENT enemy, never the true (hidden) position.
@@ -340,7 +425,7 @@ const t = new Runner('unit');
   t.ok('god view target is true midpoint', V.eq(god.target, V.of(0, 2.5, 0)));
 
   // contrast: at turn 0 the plan view hides the enemy (light-lag), god view reveals it
-  const g2 = new Engine();
+  const g2 = new Engine({ starts: [V.of(-50, 0, 0), V.of(50, 0, 0)] });
   const planShips = View.buildPlanScene(g2, 0, { accel: V.of(), weapon: 'none' }, {}).primitives.filter((p) => p.type === 'ship');
   t.ok('plan view shows only own ship early', planShips.length === 1);
   t.ok('god view reveals the enemy even before its light arrives', View.buildGodScene(g2).primitives.filter((p) => p.type === 'ship').length === 2);
@@ -447,7 +532,10 @@ const t = new Runner('unit');
   const randDir = () => { let x, y, z, l; do { x = rnd() * 2 - 1; y = rnd() * 2 - 1; z = rnd() * 2 - 1; l = x * x + y * y + z * z; } while (l < 1e-4 || l > 1); l = Math.sqrt(l); return V.of(x / l, y / l, z / l); };
 
   const RUNS = 50;
-  let aiWins = 0, kills = 0, maxTurn = 0, worst = null;
+  // With close stargates + spawn boost, the Hunter and a fleeing runner can also RAM
+  // each other (a mutual collision -> draw). The runner must NEVER win; the Hunter wins
+  // the large majority outright, and every decided run ends by a kill OR a collision.
+  let aiWins = 0, kills = 0, collisions = 0, runnerWins = 0, maxTurn = 0, worst = null;
   for (let run = 0; run < RUNS; run++) {
     // randomized (but seeded -> reproducible) start positions AND flee direction
     const g = new Engine({ rng: rnd }); const dir = randDir(); let guard = 0;
@@ -458,11 +546,14 @@ const t = new Runner('unit');
     }
     if (g.winner === 1) aiWins++;
     if (g.winner === 1 && g.endReason === 'destroyed') kills++;
+    if (g.endReason === 'collision') collisions++;
+    if (g.winner === 0) runnerWins++;
     maxTurn = Math.max(maxTurn, g.turn);
-    if (g.winner !== 1 && !worst) worst = { dir, winner: g.winner, reason: g.endReason, turns: g.turn };
+    if (g.winner === 0 && !worst) worst = { dir, winner: g.winner, reason: g.endReason, turns: g.turn };
   }
-  t.ok(`AI beats a straight-line runner in all ${RUNS} random directions`, aiWins === RUNS, worst ? JSON.stringify(worst) : '');
-  t.ok(`AI actually DESTROYS the runner in all ${RUNS} runs`, kills === RUNS, 'kills=' + kills + '/' + RUNS);
+  t.ok(`the fleeing runner NEVER beats the Hunter (${RUNS} directions)`, runnerWins === 0, worst ? JSON.stringify(worst) : '');
+  t.ok('Hunter wins outright in the large majority of runs', aiWins >= RUNS * 0.8, 'aiWins=' + aiWins + '/' + RUNS);
+  t.ok('every decided run ends by a kill or a mutual collision', kills + collisions === RUNS, `kills=${kills} collisions=${collisions}`);
   t.ok('Hunter closes and kills promptly (well before the turn cap)', maxTurn <= 60, 'maxTurn=' + maxTurn);
 })();
 

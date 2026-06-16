@@ -33,6 +33,17 @@
     ];
   }
 
+  /* Push stargate primitives into `prim`. Stargates are static, universally-visible
+   * launch points — shown to BOTH players from turn 0. They mark where each ship
+   * STARTED (and the direction it launched), never where the enemy is now. */
+  function pushStargates(prim, stargates) {
+    for (const g of stargates || []) {
+      prim.push({ type: 'stargate', pos: g.pos, dir: g.facing, color: COL[g.owner], radius: 7 });
+      prim.push({ type: 'label', pos: g.pos, text: `P${g.owner + 1} STARGATE`, color: COL[g.owner], dy: 22, alpha: 0.55 });
+    }
+    return prim;
+  }
+
   /* Planning view for `viewer`, reflecting an in-progress `plan`. */
   function buildPlanScene(game, viewer, plan, opts) {
     opts = opts || {};
@@ -42,6 +53,7 @@
     const me = view.me;
     const myCol = COL[viewer], enCol = COL[1 - viewer];
     const prim = backdrop(view.arenaRadius, view.overtime);
+    pushStargates(prim, view.stargates); // static launch points, public from turn 0
 
     // --- own ship (known exactly) ---
     prim.push({ type: 'ship', pos: me.pos, color: myCol, size: 10, dropLine: true });
@@ -146,6 +158,7 @@
    * so revealing true positions here does not break the light-delay contract. */
   function buildReplayScene(game, gtime) {
     const prim = backdrop(CFG.arenaRadius0, false);
+    pushStargates(prim, game.stargates);
     const tick = Math.max(0, Math.min(Math.floor(gtime), game.turn - 1));
     const localA = gtime - Math.floor(gtime);
 
@@ -173,6 +186,7 @@
           const fullyBlocked = h.damage === 0 && h.blocked > 0;
           prim.push({ type: 'burst', pos: h.point, worldRadius: fullyBlocked ? 6 : 10, color: fullyBlocked ? '#5cff9d' : '#ff4d6d', t: tt });
         }
+        if (rep.collision) prim.push({ type: 'burst', pos: rep.collision.point, worldRadius: 16, color: '#ffd34e', t: (localA - 0.5) / 0.5 });
       }
     }
     const mid = V.scale(V.add(histAt(game.ships[0].history, gtime), histAt(game.ships[1].history, gtime)), 0.5);
@@ -187,6 +201,7 @@
    * position (no light delay). Deliberately omniscient; for debugging only. */
   function buildGodScene(game) {
     const prim = backdrop(game.arenaRadius(), game.inOvertime());
+    pushStargates(prim, game.stargates);
     game.ships.forEach((s, i) => {
       prim.push({ type: 'ship', pos: s.pos, color: COL[i], size: 10, dropLine: true, ghost: !s.alive });
       if (V.len(s.vel) > 1e-3) prim.push({ type: 'arrow', a: s.pos, b: V.add(s.pos, s.vel), color: COL[i], width: 1.2 });
@@ -216,6 +231,7 @@
     const a = Math.max(0, Math.min(1, alpha));
     const T = rep.from, tNow = T + a;
     const prim = backdrop(game.arenaRadiusAt(rep.to), game.inOvertime());
+    pushStargates(prim, game.stargates);
     game.ships.forEach((s, i) => {
       const p = histAt(s.history, tNow);
       const tickVel = V.sub(histAt(s.history, T + 1), histAt(s.history, T)); // this tick's motion
@@ -236,6 +252,7 @@
         const fullyBlocked = h.damage === 0 && h.blocked > 0;
         prim.push({ type: 'burst', pos: h.point, worldRadius: fullyBlocked ? 6 : 10, color: fullyBlocked ? '#5cff9d' : '#ff4d6d', t: tt });
       }
+      if (rep.collision) prim.push({ type: 'burst', pos: rep.collision.point, worldRadius: 16, color: '#ffd34e', t: (a - 0.5) / 0.5 });
     }
     const mid = V.scale(V.add(histAt(game.ships[0].history, tNow), histAt(game.ships[1].history, tNow)), 0.5);
     prim.push({ type: 'label', pos: mid, text: `GOD VIEW · resolving turn ${rep.to}`, color: '#ffd34e', dy: 0, alpha: 0.6 });
